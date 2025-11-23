@@ -1,0 +1,28 @@
+# Backend web
+fastapi
+uvicorn[standard]
+
+# Modèles / validation
+pydantic
+
+# Authentification & mots de passe (JWT + hash bcrypt)
+python-jose[cryptography]
+passlib[bcrypt]
+
+# Stockage Excel
+openpyxl
+
+# Alternative base de données SQLite (pour plus tard)
+sqlalchemy
+
+# Appels HTTP vers services externes (IA, sites web)
+httpx
+
+# Envoi d'e-mails
+fastapi-mail
+
+# Tâches planifiées (rappels de maintenances)
+apscheduler
+
+# Gestion des variables d'environnement (.env)
+python-dotenv
