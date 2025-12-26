@@ -11,7 +11,7 @@ class DataManager:
         self.db_ready = False
         self.current_user = None # Stocke les infos de l'utilisateur connecté
 
-    # --- CONNEXION SYSTÈME (Pour vérifier le login) ---
+    # --- C'EST CETTE FONCTION QUI MANQUAIT ---
     def connect_system_db(self, url, key):
         try:
             self.supabase = create_client(url, key)
@@ -22,6 +22,7 @@ class DataManager:
         except Exception as e:
             self.load_status = f"Erreur Système: {e}"
             return False
+    # -----------------------------------------
 
     def _hash_password(self, password):
         """Hachage simple pour ne pas stocker le mot de passe en clair"""
