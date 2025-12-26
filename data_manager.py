@@ -6,34 +6,35 @@ import hashlib
 
 class DataManager:
     def __init__(self):
-        self.load_status = "En attente..."
+        self.load_status = "Non connecté"
         self.supabase: Client = None
         self.db_ready = False
-        self.current_user = None # Stocke les infos de l'utilisateur connecté
+        self.current_user = None
 
-    # --- C'EST CETTE FONCTION QUI MANQUAIT ---
     def connect_system_db(self, url, key):
+        """Tente de connecter la base de données"""
         try:
+            if not url or not key: return False
             self.supabase = create_client(url, key)
-            # Petit test ping
+            # Test de connexion (ping)
             self.supabase.table('users').select("count", count='exact').execute()
             self.db_ready = True
             return True
         except Exception as e:
-            self.load_status = f"Erreur Système: {e}"
+            self.load_status = f"Erreur: {str(e)}"
+            self.db_ready = False
             return False
-    # -----------------------------------------
 
     def _hash_password(self, password):
-        """Hachage simple pour ne pas stocker le mot de passe en clair"""
         return hashlib.sha256(password.encode()).hexdigest()
 
-    # --- GESTION UTILISATEURS ---
+    # --- AUTHENTIFICATION ---
 
-    def register_user(self, nom, email, password, groq_key, sb_url=None, sb_key=None):
-        if not self.db_ready: return False, "Pas de connexion DB Système"
+    def register_user(self, nom, email, password, groq_key):
+        # On suppose que la DB est connectée juste avant l'appel
+        if not self.db_ready: return False, "Erreur : Base de données non connectée."
         try:
-            # Vérif doublon email
+            # Vérif existence
             res = self.supabase.table('users').select("*").eq('email', email).execute()
             if res.data: return False, "Cet email existe déjà."
 
@@ -41,49 +42,38 @@ class DataManager:
                 'nom': nom,
                 'email': email,
                 'password_hash': self._hash_password(password),
-                'groq_key': groq_key,
-                'user_supabase_url': sb_url if sb_url else None,
-                'user_supabase_key': sb_key if sb_key else None
+                'groq_key': groq_key
             }
-            # Insertion
             data = self.supabase.table('users').insert(new_user).execute()
             if data.data:
                 self.current_user = data.data[0]
-                return True, f"Bienvenue {self.current_user['nom']} (ID: {self.current_user['id']})"
-            return False, "Erreur inconnue lors de la création."
+                return True, f"Compte créé ! (ID: {self.current_user['id']})"
+            return False, "Erreur lors de la création."
         except Exception as e: return False, str(e)
 
     def login_user(self, email, password):
-        if not self.db_ready: return False, "Système non connecté"
+        if not self.db_ready: return False, "Le serveur n'est pas initialisé (Faites une inscription pour le réveiller ou configurez les secrets)."
         try:
             pwd_hash = self._hash_password(password)
-            # On cherche l'user qui correspond au mail ET au hash du mot de passe
             response = self.supabase.table('users').select("*").eq('email', email).eq('password_hash', pwd_hash).execute()
             
             if response.data:
                 self.current_user = response.data[0]
-                return True, f"Ravi de vous revoir, {self.current_user.get('nom')}."
+                return True, f"Connexion réussie."
             else:
                 return False, "Email ou mot de passe incorrect."
         except Exception as e: return False, str(e)
 
     def get_user_api_keys(self):
-        """Renvoie les clés stockées pour configurer l'IA sans les redemander"""
         if self.current_user:
-            return {
-                'groq': self.current_user.get('groq_key'),
-                'sb_url': self.current_user.get('user_supabase_url'),
-                'sb_key': self.current_user.get('user_supabase_key')
-            }
+            return {'groq': self.current_user.get('groq_key')}
         return None
 
-    # --- VEHICULES (LOGIQUE ADMIN ICI) ---
-    
+    # --- VEHICULES (ADMIN MODE) ---
     def get_vehicle_list(self):
         if not self.db_ready or not self.current_user: return []
         try:
-            # >>> MODE DÉVELOPPEUR <<<
-            # Si l'utilisateur est le n°1, il voit TOUT. Sinon, filtre par user_id.
+            # Si ID 1 (Admin) -> Voit tout. Sinon -> Voit ses véhicules.
             if self.current_user['id'] == 1:
                 response = self.supabase.table('vehicules').select("*").execute()
             else:
@@ -92,8 +82,6 @@ class DataManager:
             
             df = pd.DataFrame(response.data)
             if df.empty: return []
-            
-            # Affichage légèrement différent pour l'admin (on affiche le nom du proprio si dispo, sinon juste marque/modèle)
             return [(r['id'], f"{r.get('marque')} {r.get('modele')} - {r.get('immatriculation')}") for _, r in df.iterrows()]
         except: return []
 
@@ -101,9 +89,7 @@ class DataManager:
         if not self.db_ready: return None
         try:
             query = self.supabase.table('vehicules').select("*").eq('id', v_id)
-            
-            # Si PAS Admin (ID != 1), on vérifie que le véhicule lui appartient
-            if self.current_user['id'] != 1:
+            if self.current_user['id'] != 1: # Restriction si pas admin
                 query = query.eq('user_id', self.current_user['id'])
             
             response = query.execute()
@@ -116,7 +102,6 @@ class DataManager:
     def add_vehicle(self, info):
         if not self.db_ready or not self.current_user: return
         try:
-            # L'Admin ou le User ajoute un véhicule à SON nom
             db_row = {
                 'user_id': self.current_user['id'], 
                 'nom': info.get('Nom'), 'marque': info.get('Marque'), 'modele': info.get('Modele'), 
@@ -125,14 +110,10 @@ class DataManager:
             self.supabase.table('vehicules').insert(db_row).execute()
         except Exception as e: st.error(f"Erreur Ajout: {e}")
 
-    # --- LE RESTE EST STANDARD (Accès par vehicule_id, donc sécurisé de fait) ---
-
+    # --- HISTORIQUE & DIAGS ---
     def get_notes_list(self, v_id):
-        if not self.db_ready: return []
+        if not self.get_vehicle_info(v_id): return []
         try:
-            # On vérifie l'accès au véhicule avant de charger les notes (via get_vehicle_info)
-            if not self.get_vehicle_info(v_id): return []
-            
             response = self.supabase.table('historique_vehicules').select("*").eq('vehicule_id', v_id).order('date', desc=True).execute()
             mapped = []
             for r in response.data:
@@ -141,10 +122,9 @@ class DataManager:
         except: return []
 
     def add_note(self, v_id, type_n, text_n, date_interv):
-        if not self.db_ready: return
+        if not self.get_vehicle_info(v_id): return
         try:
-            v_info = self.get_vehicle_info(v_id) # Vérif droits
-            if not v_info: return 
+            v_info = self.get_vehicle_info(v_id)
             km = v_info.get('KM_Actuel', 0)
             self.supabase.table('historique_vehicules').insert({'vehicule_id': v_id, 'date': date_interv.strftime("%Y-%m-%d"), 'type_evenement': type_n, 'notes': text_n, 'kilometrage': km}).execute()
         except Exception as e: st.error(f"Erreur: {e}")
