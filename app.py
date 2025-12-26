@@ -1,164 +1,207 @@
 import streamlit as st
 import os
-# On supprime tkinter qui fait planter le web
-# import tkinter as tk 
 from data_manager import DataManager
 from ai_engine import AIEngine
 import pandas as pd
 from datetime import date
-import tempfile
 
-st.set_page_config(page_title="ELGarage Mobile", layout="wide", initial_sidebar_state="collapsed") # Collapsed pour mobile
+# Configuration de la page (Mode Mobile)
+st.set_page_config(page_title="ELGarage Cloud", layout="wide", initial_sidebar_state="collapsed")
 
-# --- CSS MOBILE ---
+# --- CSS POUR MOBILE ---
 st.markdown("""
 <style>
-    /* Ajustements pour écrans tactiles */
-    .stButton>button { height: 3em; width: 100%; border-radius: 10px; }
-    .report-container { background-color: #f8f9fa; border: 2px solid #f25c05; border-radius: 10px; padding: 15px; }
-    /* Cacher le menu hamburger Streamlit pour faire plus "App" */
+    /* Boutons plus gros pour le tactile */
+    .stButton>button { height: 3em; width: 100%; border-radius: 10px; font-weight: bold; }
+    /* Conteneurs de rapport stylisés */
+    .report-container { background-color: #f8f9fa; border: 2px solid #f25c05; border-radius: 10px; padding: 15px; margin-bottom: 20px; }
+    /* Cacher les éléments inutiles de Streamlit */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
+    .block-container { padding-top: 1rem; padding-bottom: 5rem; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- ETATS ---
+# --- INITIALISATION ---
 if 'dm' not in st.session_state: st.session_state['dm'] = DataManager()
 dm = st.session_state['dm']
 
-# --- MAIN ---
-st.title("📱 ELGarage Mobile")
+# --- TITRE & CONNEXION DB ---
+st.title("📱 ELGarage Pro")
 
-# 1. GESTION FICHIER (Remplacé par Uploader)
-if not st.session_state.get('db_loaded'):
-    st.info("Veuillez charger votre base Excel")
-    uploaded_file = st.file_uploader("Choisissez votre fichier Excel", type=['xlsx'])
-    
-    if uploaded_file is not None:
-        # On sauvegarde le fichier temporairement pour que DataManager puisse le lire
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp_file:
-            tmp_file.write(uploaded_file.getvalue())
-            tmp_path = tmp_file.name
-            
-        if dm.load_db(tmp_path):
-            st.session_state['db_path'] = tmp_path
-            st.session_state['db_loaded'] = True
-            st.success("Chargé !")
-            st.rerun()
-    st.stop()
+# Vérification de la connexion Supabase au démarrage
+if not dm.load_db():
+    st.error("❌ Erreur de connexion à la Base de Données (Supabase).")
+    st.info("⚠️ Vérifiez que vous avez bien configuré les 'Secrets' dans Streamlit Cloud (URL et KEY).")
+    st.stop() # On arrête tout si pas de DB
+else:
+    st.caption(f"{dm.load_status}") # Affiche "Connecté" en petit
 
-# --- SIDEBAR (Menu) ---
-st.sidebar.title("Menu Atelier")
+# --- SIDEBAR (CONFIGURATION) ---
+st.sidebar.title("⚙️ Configuration")
 
-# Clé API
-api_key_input = st.sidebar.text_input("Clé Groq", type="password")
-if not api_key_input and 'cur_key' not in st.session_state:
-    st.warning("Clé API manquante (Menu à gauche)")
+# 1. Clé API Groq
+api_key_input = st.sidebar.text_input("Clé API Groq", type="password", help="Nécessaire pour l'IA")
+if not api_key_input:
+    st.sidebar.warning("⚠️ Clé IA manquante")
 
-# Modèle
-mod = st.sidebar.selectbox("Modèle", ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"], index=0)
+# 2. Modèle IA
+mod = st.sidebar.selectbox("Modèle IA", ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "gemma2-9b-it"], index=0)
 
-# Init IA
+# 3. Initialisation du moteur IA
 if api_key_input:
-    st.session_state['cur_key'] = api_key_input
-
-if 'cur_key' in st.session_state:
-    if 'ai' not in st.session_state or st.session_state.get('cur_m') != mod:
-        st.session_state['ai'] = AIEngine(api_key=st.session_state['cur_key'], model_name=mod)
+    # On met à jour l'IA si la clé ou le modèle change
+    if 'ai' not in st.session_state or st.session_state.get('cur_key') != api_key_input or st.session_state.get('cur_m') != mod:
+        st.session_state['ai'] = AIEngine(api_key=api_key_input, model_name=mod)
+        st.session_state['cur_key'] = api_key_input
         st.session_state['cur_m'] = mod
-    ai = st.session_state['ai']
+        st.toast("Moteur IA prêt !", icon="🤖")
 
-# --- NAVIGATION MOBILE ---
-# Sur mobile, les onglets du haut sont mieux que la sidebar
-menu = st.radio("Aller à :", ["Tableau de bord", "Nouveau Véhicule"], horizontal=True)
+# --- NAVIGATION PRINCIPALE ---
+menu = st.radio("Navigation :", ["Tableau de bord", "Nouveau Véhicule"], horizontal=True)
 
+# --- PAGE 1 : NOUVEAU VÉHICULE ---
 if menu == "Nouveau Véhicule":
-    st.subheader("Nouveau Véhicule")
-    with st.form("new"):
-        nom=st.text_input("Nom Client")
+    st.subheader("Ajouter un véhicule")
+    with st.form("new_vehicle_form"):
+        nom = st.text_input("Nom Client / Réf")
         c1, c2 = st.columns(2)
-        marq=c1.text_input("Marque"); mod_v=c2.text_input("Modèle")
-        immat=c1.text_input("Immat"); annee=c2.number_input("Année",1990,2030)
-        km=st.number_input("KM",0)
-        if st.form_submit_button("Créer Véhicule"):
-            dm.add_vehicle({"Nom":nom,"Immatriculation":immat,"Marque":marq,"Modele":mod_v,"Annee":annee,"KM_Actuel":km})
-            st.success("OK"); st.rerun()
+        marq = c1.text_input("Marque")
+        mod_v = c2.text_input("Modèle")
+        immat = c1.text_input("Immatriculation")
+        annee = c2.number_input("Année", 1990, 2030, 2015)
+        km = st.number_input("Kilométrage Actuel", 0, step=100)
+        
+        if st.form_submit_button("Créer la fiche", type="primary"):
+            if nom and marq and immat:
+                dm.add_vehicle({
+                    "Nom": nom, "Immatriculation": immat, "Marque": marq, 
+                    "Modele": mod_v, "Annee": annee, "KM_Actuel": km
+                })
+                st.success(f"Véhicule {immat} ajouté avec succès !")
+                st.rerun()
+            else:
+                st.error("Merci de remplir au moins le Nom, la Marque et l'Immatriculation.")
 
+# --- PAGE 2 : TABLEAU DE BORD ---
 elif menu == "Tableau de bord":
     v_list = dm.get_vehicle_list()
-    if v_list:
-        sel = st.selectbox("Véhicule", v_list, format_func=lambda x: x[1])
+    
+    if not v_list:
+        st.info("Aucun véhicule dans la base. Commencez par en ajouter un !")
+    else:
+        # Sélecteur de véhicule
+        sel = st.selectbox("Sélectionner Véhicule :", v_list, format_func=lambda x: x[1])
         v_id = sel[0]
         v_info = dm.get_vehicle_info(v_id)
 
-        st.markdown(f"**{v_info.get('Marque')} {v_info.get('Modele')}** ({v_info.get('Immatriculation')})")
-        
-        # Onglets simplifiés pour mobile
-        t1, t2, t3 = st.tabs(["🔧 DIAG", "📝 NOTES", "📅 MAINT"])
-
-        with t1:
-            st.caption("Diagnostic IA")
-            with st.form("diag"):
-                codes = st.text_input("Codes OBD")
-                symp = st.text_area("Symptômes")
-                go = st.form_submit_button("Analyser ⚡")
+        if v_info:
+            # En-tête véhicule
+            st.markdown(f"### 🚘 {v_info.get('Marque')} {v_info.get('Modele')}")
+            st.caption(f"Immat: {v_info.get('Immatriculation')} | {v_info.get('KM_Actuel')} KM | Année: {v_info.get('Annee')}")
             
-            if go:
-                if 'ai' not in st.session_state:
-                    st.error("Entrez la clé API dans le menu >")
+            # Onglets de travail
+            t1, t2, t3, t4 = st.tabs(["🔧 DIAG", "📝 NOTES", "📅 MAINT", "ℹ️ INFO"])
+
+            # --- ONGLET DIAGNOSTIC ---
+            with t1:
+                st.write("**Nouveau Diagnostic IA**")
+                with st.form("diag_form"):
+                    codes = st.text_input("Codes Défaut (OBD)", placeholder="P0300, P0172...")
+                    symp = st.text_area("Symptômes / Observations", placeholder="Bruits, voyants, fumée...")
+                    go_diag = st.form_submit_button("Lancer Analyse ⚡", type="primary")
+                
+                if go_diag:
+                    if 'ai' not in st.session_state:
+                        st.error("Veuillez entrer une Clé API dans le menu (⚙️) à gauche.")
+                    else:
+                        ai = st.session_state['ai']
+                        with st.spinner("L'IA analyse les données..."):
+                            hist_txt = dm.get_full_history_text(v_id)
+                            res = ai.analyze_obd(v_info, hist_txt, f"Codes: {codes}. Symp: {symp}", date.today())
+                            
+                            if "error" in res:
+                                st.error(res['error'])
+                            else:
+                                # Affichage du résultat
+                                st.markdown(f"""
+                                <div class="report-container">
+                                    <h3 style="color:#f25c05; text-align:center">{res.get('titre_rapport')}</h3>
+                                    <p><strong>Synthèse :</strong> {res.get('resume_court')}</p>
+                                    <hr>
+                                    <p><strong>Gravité :</strong> {res.get('gravite_score')}/5 &nbsp;|&nbsp; <strong>Santé :</strong> {res.get('sante_vehicule')}</p>
+                                    <p><strong>Coût Est. :</strong> {res.get('estimation_cout_pieces_mo')}</p>
+                                </div>
+                                """, unsafe_allow_html=True)
+                                
+                                with st.expander("Voir Analyse Détaillée"):
+                                    st.write(res.get('analyse_technique_detaillee'))
+                                    st.write("---")
+                                    st.write("**Plan d'action :**")
+                                    st.write(res.get('plan_action_propose'))
+
+                                # Sauvegarde automatique dans Supabase
+                                dm.save_diagnostic(
+                                    v_id, codes, str(res), 
+                                    res.get('estimation_cout_pieces_mo'), 
+                                    res.get('sante_vehicule'), 
+                                    date.today(), 
+                                    res.get('resume_court')
+                                )
+                                st.toast("Rapport sauvegardé !", icon="✅")
+
+                st.divider()
+                st.write("**Historique Diagnostics**")
+                dh = dm.get_diagnostic_history(v_id)
+                if dh:
+                    dfh = pd.DataFrame(dh)
+                    # Affichage simplifié pour mobile
+                    if 'Date_Detection' in dfh.columns and 'Resume_IA' in dfh.columns:
+                        st.dataframe(dfh[['Date_Detection', 'Resume_IA']], hide_index=True, use_container_width=True)
+                    else:
+                        st.write("Données disponibles mais format incomplet.")
                 else:
-                    with st.spinner("Analyse..."):
-                        hist_txt = dm.get_full_history_text(v_id)
-                        res = ai.analyze_obd(v_info, hist_txt, f"Codes: {codes}. Symp: {symp}", date.today())
-                        if "error" in res: st.error(res['error'])
-                        else:
-                            st.info(f"Gravité: {res.get('gravite_score')}/5")
-                            st.write(res.get('resume_court'))
-                            with st.expander("Voir détails"):
-                                st.write(res.get('analyse_technique_detaillee'))
-                                st.write(res.get('plan_action_propose'))
-                            dm.save_diagnostic(v_id, codes, str(res), res.get('estimation_cout_pieces_mo'), res.get('sante_vehicule'), date.today(), res.get('resume_court'))
+                    st.caption("Aucun diagnostic précédent.")
 
-            st.divider()
-            st.caption("Historique")
-            dh = dm.get_diagnostic_history(v_id)
-            if dh:
-                dfh = pd.DataFrame(dh)
-                # Affichage simple pour mobile
-                col_res = 'Resume_IA' if 'Resume_IA' in dfh.columns else 'Code_Defaut'
-                col_date = 'Date_Detection' if 'Date_Detection' in dfh.columns else 'Date'
-                if col_res in dfh.columns:
-                    st.dataframe(dfh[[col_date, col_res]], hide_index=True, use_container_width=True)
-
-        with t2:
-            notes = dm.get_notes_list(v_id)
-            if notes: 
-                dfn = pd.DataFrame(notes)
-                # Logique colonne date robuste
-                d_col = 'Date_Intervention' if 'Date_Intervention' in dfn.columns else ('Date' if 'Date' in dfn.columns else 'Date_Saisie')
-                cols = [c for c in [d_col, 'Type', 'Notes'] if c in dfn.columns]
-                st.dataframe(dfn[cols], hide_index=True)
-            
-            with st.expander("Ajouter Note"):
-                with st.form("add_n"):
-                    ty=st.selectbox("Type", ["Entretien", "Panne", "Note"])
-                    tx=st.text_area("Note")
-                    if st.form_submit_button("Sauvegarder"):
-                        dm.add_note(v_id, ty, tx, date.today()); st.rerun()
-
-        with t3:
-            if st.button("Calculer Plan"):
-                if 'ai' not in st.session_state: st.error("Clé API manquante")
+            # --- ONGLET NOTES / ENTRETIENS ---
+            with t2:
+                # Liste des notes
+                notes = dm.get_notes_list(v_id)
+                if notes:
+                    dfn = pd.DataFrame(notes)
+                    if 'Date_Intervention' in dfn.columns:
+                        st.dataframe(dfn[['Date_Intervention', 'Type', 'Notes']], hide_index=True, use_container_width=True)
                 else:
-                    with st.spinner("Calcul..."):
-                        res = ai.check_maintenance_schedule(v_info, dm.get_full_history_text(v_id))
-                        if "error" not in res: st.markdown(res.get('response'))
+                    st.caption("Aucune intervention enregistrée.")
+                
+                st.divider()
+                # Ajout de note
+                with st.expander("➕ Ajouter une intervention"):
+                    with st.form("add_note"):
+                        d_int = st.date_input("Date", date.today())
+                        typ = st.selectbox("Type", ["Entretien", "Réparation Méca", "Diag Élec", "Carrosserie", "Note"])
+                        txt = st.text_area("Détails")
+                        if st.form_submit_button("Enregistrer"):
+                            dm.add_note(v_id, typ, txt, d_int)
+                            st.success("Note ajoutée !")
+                            st.rerun()
 
-    else: st.warning("Ajoutez un véhicule")
+            # --- ONGLET MAINTENANCE ---
+            with t3:
+                st.write("**Plan de Maintenance Prévisionnel**")
+                if st.button("Calculer Plan (IA) 📅", type="primary"):
+                    if 'ai' not in st.session_state:
+                        st.error("Clé API manquante.")
+                    else:
+                        with st.spinner("Génération du plan..."):
+                            ai = st.session_state['ai']
+                            res = ai.check_maintenance_schedule(v_info, dm.get_full_history_text(v_id))
+                            if "error" in res:
+                                st.error(res['error'])
+                            else:
+                                st.markdown(res.get('response'))
+                                dm.save_echeance(v_id, res.get('response'))
 
-# Bouton de sauvegarde explicite (pour Excel)
-if st.sidebar.button("💾 Sauvegarder Excel"):
-    # Sur le web, on ne peut pas écraser le fichier local de l'utilisateur.
-    # On doit lui proposer de télécharger le fichier modifié.
-    with open(st.session_state['db_path'], "rb") as f:
-        st.download_button("Télécharger Base Modifiée", f, file_name="Garage_DB_Updated.xlsx")
+            # --- ONGLET INFOS ---
+            with t4:
+                st.json(v_info)
