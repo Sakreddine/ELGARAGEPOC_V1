@@ -14,8 +14,8 @@ dm = st.session_state['dm']
 #  ZONE ADMIN / DÉVELOPPEUR (Remplissez ici pour connexion auto)
 # ==============================================================================
 # Copiez ces infos depuis Supabase > Project Settings > API
-ADMIN_SB_URL = "https://votre-projet.supabase.co"  # << REMPLACEZ ICI
-ADMIN_SB_KEY = "votre-cle-anon-public-ici"         # << REMPLACEZ ICI
+ADMIN_SB_URL = "https://ljdzsqpzbxtrptdaftur.supabase.co"  # << REMPLACEZ ICI
+ADMIN_SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxqZHpzcXB6Ynh0cnB0ZGFmdHVyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY3NjA3NTIsImV4cCI6MjA4MjMzNjc1Mn0.Z0IaWz901FG360CrGMHAQBdDJ88md2p2mpCe-Y5yOVY"         # << REMPLACEZ ICI
 # ==============================================================================
 
 # --- TENTATIVE DE CONNEXION AUTOMATIQUE ---
@@ -183,4 +183,3 @@ elif menu == "Tableau de bord":
                 if st.button("Plan"):
                     r=ai.check_maintenance_schedule(v_info, dm.get_full_history_text(v_id))
                     if "error" not in r: st.markdown(r['response']); dm.save_echeance(v_id, r['response'])
-
