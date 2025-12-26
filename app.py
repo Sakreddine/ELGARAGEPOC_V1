@@ -10,17 +10,34 @@ st.markdown("""<style>.stButton>button { height: 3em; width: 100%; border-radius
 if 'dm' not in st.session_state: st.session_state['dm'] = DataManager()
 dm = st.session_state['dm']
 
-# Tentative de connexion silencieuse (si clés en cache ou secrets)
-if not dm.db_ready:
-    # 1. Via Secrets (Cloud)
-    try:
-        dm.connect_system_db(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
-    except:
-        # 2. Via Session State (Si on vient de se déconnecter/recharger)
-        if 'sys_url' in st.session_state:
-            dm.connect_system_db(st.session_state['sys_url'], st.session_state['sys_key'])
+# ==============================================================================
+#  ZONE ADMIN / DÉVELOPPEUR (Remplissez ici pour connexion auto)
+# ==============================================================================
+# Copiez ces infos depuis Supabase > Project Settings > API
+ADMIN_SB_URL = "https://votre-projet.supabase.co"  # << REMPLACEZ ICI
+ADMIN_SB_KEY = "votre-cle-anon-public-ici"         # << REMPLACEZ ICI
+# ==============================================================================
 
-# --- LOGIQUE D'AUTHENTIFICATION ---
+# --- TENTATIVE DE CONNEXION AUTOMATIQUE ---
+if not dm.db_ready:
+    # 1. On essaie avec les clés "En dur" ci-dessus (Priorité DEV)
+    if "votre-projet" not in ADMIN_SB_URL and "votre-cle" not in ADMIN_SB_KEY:
+        if dm.connect_system_db(ADMIN_SB_URL, ADMIN_SB_KEY):
+            # Succès silencieux, on ne dit rien, ça marche juste.
+            pass
+
+    # 2. Si ça a raté, on essaie via les Secrets (Cloud)
+    if not dm.db_ready:
+        try:
+            dm.connect_system_db(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
+        except: pass
+
+    # 3. Si ça a raté, on essaie via le cache de session
+    if not dm.db_ready and 'sys_url' in st.session_state:
+        dm.connect_system_db(st.session_state['sys_url'], st.session_state['sys_key'])
+
+
+# --- UI AUTHENTIFICATION ---
 if 'user_logged_in' not in st.session_state: st.session_state['user_logged_in'] = False
 
 if not st.session_state['user_logged_in']:
@@ -28,15 +45,22 @@ if not st.session_state['user_logged_in']:
     with col_logo: st.markdown("<h1>🚗</h1>", unsafe_allow_html=True)
     with col_title: st.title("ELGarage")
     
+    # Indicateur de statut serveur
+    if dm.db_ready:
+        st.caption("🟢 Serveur connecté (Mode Admin Hardcoded)")
+    else:
+        st.warning("🔴 Serveur déconnecté. Veuillez configurer les clés dans l'onglet 'Créer un compte'.")
+
     tab_login, tab_register = st.tabs(["Connexion", "Créer un compte (Setup)"])
     
     # --- ONGLET CONNEXION ---
     with tab_login:
         email = st.text_input("Email", key="log_email")
         pwd = st.text_input("Mot de passe", type="password", key="log_pwd")
+        
         if st.button("Se connecter", type="primary"):
             if not dm.db_ready:
-                st.error("⚠️ Le serveur n'est pas connecté. Si vous êtes le propriétaire, allez dans l'onglet 'Créer un compte' pour initialiser la connexion avec vos clés.")
+                st.error("Serveur non connecté. Vérifiez vos variables ADMIN_SB_URL dans le code.")
             else:
                 ok, msg = dm.login_user(email, pwd)
                 if ok:
@@ -48,9 +72,9 @@ if not st.session_state['user_logged_in']:
                     st.rerun()
                 else: st.error(msg)
 
-    # --- ONGLET INSCRIPTION (AVEC INIT SYSTEME) ---
+    # --- ONGLET INSCRIPTION ---
     with tab_register:
-        st.caption("C'est ici que vous initialisez l'application si c'est la première fois.")
+        st.caption("Création de compte + Initialisation manuelle si besoin.")
         
         c1, c2 = st.columns(2)
         new_nom = c1.text_input("Nom complet")
@@ -59,32 +83,36 @@ if not st.session_state['user_logged_in']:
         new_groq = st.text_input("Clé API Groq (gsk_...)", type="password")
         
         st.markdown("---")
-        st.subheader("🛠️ Initialisation Système")
-        st.caption("Requis uniquement pour le premier lancement ou nouvel utilisateur.")
-        sys_url = st.text_input("URL Supabase (Projet)", value=st.session_state.get('sys_url', ''))
-        sys_key = st.text_input("Key Supabase (Anon)", type="password", value=st.session_state.get('sys_key', ''))
+        with st.expander("Configuration Système (Si pas connecté auto)"):
+            # On pré-remplit avec les valeurs hardcodées si elles existent
+            val_url = ADMIN_SB_URL if "votre-projet" not in ADMIN_SB_URL else ""
+            val_key = ADMIN_SB_KEY if "votre-cle" not in ADMIN_SB_KEY else ""
+            
+            sys_url = st.text_input("URL Supabase", value=val_url)
+            sys_key = st.text_input("Key Supabase", type="password", value=val_key)
 
         if st.button("S'inscrire & Initialiser"):
-            # 1. On essaie de connecter la DB avec les clés fournies
-            if dm.connect_system_db(sys_url, sys_key):
-                # On sauvegarde les clés en session pour ne pas les perdre au reload
-                st.session_state['sys_url'] = sys_url
-                st.session_state['sys_key'] = sys_key
-                
-                # 2. On crée le compte
-                if new_nom and new_mail and new_pass and new_groq:
-                    ok, msg = dm.register_user(new_nom, new_mail, new_pass, new_groq)
-                    if ok:
-                        st.session_state['user_logged_in'] = True
-                        st.session_state['ai'] = AIEngine(api_key=new_groq)
-                        st.success("Compte créé et Système connecté !")
-                        st.rerun()
-                    else: st.error(f"Connexion DB OK, mais erreur création compte : {msg}")
-                else: st.warning("Veuillez remplir les infos personnelles.")
-            else:
-                st.error("Impossible de connecter Supabase. Vérifiez URL et Key.")
+            # 1. Connexion DB
+            if not dm.db_ready:
+                if dm.connect_system_db(sys_url, sys_key):
+                    st.session_state['sys_url'] = sys_url
+                    st.session_state['sys_key'] = sys_key
+                else:
+                    st.error("Impossible de connecter la base de données.")
+                    st.stop()
+            
+            # 2. Création User
+            if new_nom and new_mail and new_pass and new_groq:
+                ok, msg = dm.register_user(new_nom, new_mail, new_pass, new_groq)
+                if ok:
+                    st.session_state['user_logged_in'] = True
+                    st.session_state['ai'] = AIEngine(api_key=new_groq)
+                    st.success("Compte créé !")
+                    st.rerun()
+                else: st.error(f"Erreur création : {msg}")
+            else: st.warning("Remplissez tous les champs personnels.")
     
-    st.stop() # Bloque le reste de l'app tant que pas connecté
+    st.stop()
 
 # =========================================================
 #  APPLICATION PRINCIPALE (Une fois connecté)
@@ -101,7 +129,7 @@ with c2:
         st.session_state['user_logged_in'] = False
         st.rerun()
 
-# Chargement IA de secours
+# Chargement IA
 if 'ai' not in st.session_state:
     k = dm.get_user_api_keys()
     if k and k.get('groq'): st.session_state['ai'] = AIEngine(k['groq'])
@@ -155,3 +183,4 @@ elif menu == "Tableau de bord":
                 if st.button("Plan"):
                     r=ai.check_maintenance_schedule(v_info, dm.get_full_history_text(v_id))
                     if "error" not in r: st.markdown(r['response']); dm.save_echeance(v_id, r['response'])
+
