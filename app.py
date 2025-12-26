@@ -5,7 +5,7 @@ from ai_engine import AIEngine
 import pandas as pd
 from datetime import date
 
-st.set_page_config(page_title="ELGarage Pro", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="ELGarage - BD_ElGarage", layout="wide", initial_sidebar_state="collapsed")
 
 # --- CSS MOBILE ---
 st.markdown("""
@@ -22,58 +22,47 @@ st.markdown("""
 if 'dm' not in st.session_state: st.session_state['dm'] = DataManager()
 dm = st.session_state['dm']
 
-# Variables de session pour stocker les clés
 if 'supabase_url' not in st.session_state: st.session_state['supabase_url'] = ''
 if 'supabase_key' not in st.session_state: st.session_state['supabase_key'] = ''
 if 'groq_key' not in st.session_state: st.session_state['groq_key'] = ''
 if 'app_unlocked' not in st.session_state: st.session_state['app_unlocked'] = False
 
-# --- ECRAN DE CONNEXION (Si pas déverrouillé) ---
+# --- ECRAN DE CONNEXION ---
 if not st.session_state['app_unlocked']:
-    st.title("🔐 Connexion Atelier")
-    st.info("Configuration initiale requise pour accéder aux données.")
+    st.title("🔐 Connexion BD_ElGarage")
+    st.info("Connectez-vous à votre base Supabase.")
     
     with st.form("login_form"):
-        st.subheader("1. Base de Données (Supabase)")
-        url_in = st.text_input("Project URL", value=st.session_state['supabase_url'], placeholder="https://xyz.supabase.co")
+        st.subheader("1. Base de Données")
+        url_in = st.text_input("Project URL", value=st.session_state['supabase_url'])
         key_in = st.text_input("API Key (anon/public)", type="password", value=st.session_state['supabase_key'])
         
         st.subheader("2. Intelligence Artificielle (Groq)")
-        groq_in = st.text_input("GroqCloud API Key", type="password", value=st.session_state['groq_key'], placeholder="gsk_...")
+        groq_in = st.text_input("Groq Key", type="password", value=st.session_state['groq_key'])
         
-        submitted = st.form_submit_button("🚀 Accéder à l'Atelier", type="primary")
-        
-        if submitted:
+        if st.form_submit_button("🚀 Connexion", type="primary"):
             if url_in and key_in and groq_in:
-                # Tentative de connexion DB
-                with st.spinner("Vérification des accès..."):
+                with st.spinner("Connexion à BD_ElGarage..."):
                     if dm.connect_db(url_in, key_in):
-                        # Si succès, on sauvegarde et on débloque
                         st.session_state['supabase_url'] = url_in
                         st.session_state['supabase_key'] = key_in
                         st.session_state['groq_key'] = groq_in
                         st.session_state['app_unlocked'] = True
-                        st.success("Connexion réussie !")
+                        st.success("Succès !")
                         st.rerun()
                     else:
-                        st.error(f"Impossible de connecter Supabase : {dm.load_status}")
+                        st.error(f"Erreur : {dm.load_status}")
             else:
-                st.warning("Tous les champs sont obligatoires.")
-    
-    st.markdown("---")
-    st.caption("ELGarage Mobile v2.0 - Configuration Cloud")
-    st.stop() # Arrête l'exécution ici tant que ce n'est pas connecté
+                st.warning("Remplissez tout.")
+    st.stop()
 
-# =========================================================
-#  APPLICATION PRINCIPALE (Seulement si connecté)
-# =========================================================
+# --- APPLICATION PRINCIPALE ---
 
-# Init IA avec la clé fournie au login
+# Init IA
 if 'ai' not in st.session_state:
     st.session_state['ai'] = AIEngine(api_key=st.session_state['groq_key'])
 ai = st.session_state['ai']
 
-# Header
 col_h1, col_h2 = st.columns([3, 1])
 with col_h1: st.title("📱 ELGarage Pro")
 with col_h2: 
@@ -81,16 +70,15 @@ with col_h2:
         st.session_state['app_unlocked'] = False
         st.rerun()
 
-st.caption("✅ Connecté au Cloud")
+st.caption("✅ Connecté à BD_ElGarage")
 
-# Navigation
 menu = st.radio("Menu :", ["Tableau de bord", "Nouveau Véhicule"], horizontal=True)
 
-# --- 1. NOUVEAU VEHICULE ---
+# 1. NOUVEAU VÉHICULE
 if menu == "Nouveau Véhicule":
-    st.subheader("Ajout Rapide")
+    st.subheader("Ajout Véhicule")
     with st.form("new_v"):
-        nom = st.text_input("Client")
+        nom = st.text_input("Nom Propriétaire")
         c1, c2 = st.columns(2)
         marq = c1.text_input("Marque"); mod_v = c2.text_input("Modèle")
         immat = c1.text_input("Immat"); km = c2.number_input("KM", 0)
@@ -100,11 +88,11 @@ if menu == "Nouveau Véhicule":
             dm.add_vehicle({"Nom":nom, "Marque":marq, "Modele":mod_v, "Immatriculation":immat, "Annee":annee, "KM_Actuel":km})
             st.success("Véhicule créé !"); st.rerun()
 
-# --- 2. TABLEAU DE BORD ---
+# 2. TABLEAU DE BORD
 elif menu == "Tableau de bord":
     v_list = dm.get_vehicle_list()
     if not v_list:
-        st.info("Base vide. Ajoutez un véhicule.")
+        st.info("Base vide ou erreur. Ajoutez un véhicule.")
     else:
         sel = st.selectbox("Véhicule :", v_list, format_func=lambda x: x[1])
         v_id = sel[0]
@@ -113,9 +101,9 @@ elif menu == "Tableau de bord":
         if v_info:
             st.markdown(f"### {v_info.get('Marque')} {v_info.get('Modele')} ({v_info.get('Immatriculation')})")
             
-            t1, t2, t3 = st.tabs(["🔧 DIAG", "📝 NOTES", "📅 MAINT"])
+            t1, t2, t3 = st.tabs(["🔧 DIAG", "📝 HISTO", "📅 MAINT"])
 
-            # ONGLET DIAG
+            # DIAG
             with t1:
                 with st.form("diag"):
                     codes = st.text_input("Codes OBD")
@@ -126,20 +114,20 @@ elif menu == "Tableau de bord":
                             res = ai.analyze_obd(v_info, hist, f"{codes} {symp}", date.today())
                             if "error" in res: st.error(res['error'])
                             else:
-                                st.info(f"Gravité: {res.get('gravite_score')}/5 | Santé: {res.get('sante_vehicule')}")
+                                st.info(f"Gravité: {res.get('gravite_score')}/5")
                                 st.write(res.get('resume_court'))
                                 with st.expander("Détails"): st.write(res.get('analyse_technique_detaillee'))
                                 dm.save_diagnostic(v_id, codes, str(res), res.get('estimation_cout_pieces_mo'), res.get('sante_vehicule'), date.today(), res.get('resume_court'))
                                 st.success("Sauvegardé")
 
-                st.write("Historique:")
+                st.write("Historique Diags:")
                 dh = dm.get_diagnostic_history(v_id)
                 if dh:
                     dfh = pd.DataFrame(dh)
                     if 'Date_Detection' in dfh.columns:
                         st.dataframe(dfh[['Date_Detection', 'Resume_IA']], hide_index=True, use_container_width=True)
 
-            # ONGLET NOTES
+            # HISTORIQUE (NOTES)
             with t2:
                 notes = dm.get_notes_list(v_id)
                 if notes:
@@ -152,9 +140,9 @@ elif menu == "Tableau de bord":
                         d=st.date_input("Date"); t=st.selectbox("Type",["Entretien","Panne"]); tx=st.text_area("Txt")
                         if st.form_submit_button("Ok"): dm.add_note(v_id,t,tx,d); st.rerun()
 
-            # ONGLET MAINT
+            # MAINTENANCE
             with t3:
-                if st.button("Plan Maintenance"):
+                if st.button("Calculer Plan"):
                     with st.spinner("Calcul..."):
                         res = ai.check_maintenance_schedule(v_info, dm.get_full_history_text(v_id))
                         if "error" not in res: 
