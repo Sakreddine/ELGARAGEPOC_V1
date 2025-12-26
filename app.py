@@ -5,7 +5,7 @@ from ai_engine import AIEngine
 import pandas as pd
 from datetime import date
 
-st.set_page_config(page_title="ELGarage - BD_ElGarage", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="ELGarage Pro", layout="wide", initial_sidebar_state="collapsed")
 
 # --- CSS MOBILE ---
 st.markdown("""
@@ -29,34 +29,36 @@ if 'app_unlocked' not in st.session_state: st.session_state['app_unlocked'] = Fa
 
 # --- ECRAN DE CONNEXION ---
 if not st.session_state['app_unlocked']:
-    st.title("🔐 Connexion BD_ElGarage")
-    st.info("Connectez-vous à votre base Supabase.")
+    st.title("🔐 Connexion Atelier")
+    st.info("Configuration initiale requise pour accéder aux données.")
     
     with st.form("login_form"):
-        st.subheader("1. Base de Données")
-        url_in = st.text_input("Project URL", value=st.session_state['supabase_url'])
+        st.subheader("1. Base de Données (Supabase)")
+        url_in = st.text_input("Project URL", value=st.session_state['supabase_url'], placeholder="https://xyz.supabase.co")
         key_in = st.text_input("API Key (anon/public)", type="password", value=st.session_state['supabase_key'])
         
         st.subheader("2. Intelligence Artificielle (Groq)")
-        groq_in = st.text_input("Groq Key", type="password", value=st.session_state['groq_key'])
+        groq_in = st.text_input("GroqCloud API Key", type="password", value=st.session_state['groq_key'], placeholder="gsk_...")
         
-        if st.form_submit_button("🚀 Connexion", type="primary"):
+        if st.form_submit_button("🚀 Accéder à l'Atelier", type="primary"):
             if url_in and key_in and groq_in:
-                with st.spinner("Connexion à BD_ElGarage..."):
+                with st.spinner("Connexion à la base..."):
                     if dm.connect_db(url_in, key_in):
                         st.session_state['supabase_url'] = url_in
                         st.session_state['supabase_key'] = key_in
                         st.session_state['groq_key'] = groq_in
                         st.session_state['app_unlocked'] = True
-                        st.success("Succès !")
+                        st.success("Connexion réussie !")
                         st.rerun()
                     else:
-                        st.error(f"Erreur : {dm.load_status}")
+                        st.error(f"Impossible de connecter Supabase : {dm.load_status}")
             else:
-                st.warning("Remplissez tout.")
+                st.warning("Tous les champs sont obligatoires.")
     st.stop()
 
-# --- APPLICATION PRINCIPALE ---
+# =========================================================
+#  APPLICATION PRINCIPALE
+# =========================================================
 
 # Init IA
 if 'ai' not in st.session_state:
@@ -70,15 +72,16 @@ with col_h2:
         st.session_state['app_unlocked'] = False
         st.rerun()
 
-st.caption("✅ Connecté à BD_ElGarage")
+st.caption("✅ Connecté à Supabase (User ID: 1)")
 
+# Navigation
 menu = st.radio("Menu :", ["Tableau de bord", "Nouveau Véhicule"], horizontal=True)
 
-# 1. NOUVEAU VÉHICULE
+# --- 1. NOUVEAU VÉHICULE ---
 if menu == "Nouveau Véhicule":
-    st.subheader("Ajout Véhicule")
+    st.subheader("Ajout Rapide")
     with st.form("new_v"):
-        nom = st.text_input("Nom Propriétaire")
+        nom = st.text_input("Nom Client (ex: Jean)")
         c1, c2 = st.columns(2)
         marq = c1.text_input("Marque"); mod_v = c2.text_input("Modèle")
         immat = c1.text_input("Immat"); km = c2.number_input("KM", 0)
@@ -88,11 +91,11 @@ if menu == "Nouveau Véhicule":
             dm.add_vehicle({"Nom":nom, "Marque":marq, "Modele":mod_v, "Immatriculation":immat, "Annee":annee, "KM_Actuel":km})
             st.success("Véhicule créé !"); st.rerun()
 
-# 2. TABLEAU DE BORD
+# --- 2. TABLEAU DE BORD ---
 elif menu == "Tableau de bord":
     v_list = dm.get_vehicle_list()
     if not v_list:
-        st.info("Base vide ou erreur. Ajoutez un véhicule.")
+        st.info("Aucun véhicule trouvé. Commencez par en ajouter un.")
     else:
         sel = st.selectbox("Véhicule :", v_list, format_func=lambda x: x[1])
         v_id = sel[0]
@@ -101,9 +104,9 @@ elif menu == "Tableau de bord":
         if v_info:
             st.markdown(f"### {v_info.get('Marque')} {v_info.get('Modele')} ({v_info.get('Immatriculation')})")
             
-            t1, t2, t3 = st.tabs(["🔧 DIAG", "📝 HISTO", "📅 MAINT"])
+            t1, t2, t3 = st.tabs(["🔧 DIAG", "📝 NOTES", "📅 MAINT"])
 
-            # DIAG
+            # ONGLET DIAG
             with t1:
                 with st.form("diag"):
                     codes = st.text_input("Codes OBD")
@@ -120,14 +123,14 @@ elif menu == "Tableau de bord":
                                 dm.save_diagnostic(v_id, codes, str(res), res.get('estimation_cout_pieces_mo'), res.get('sante_vehicule'), date.today(), res.get('resume_court'))
                                 st.success("Sauvegardé")
 
-                st.write("Historique Diags:")
+                st.caption("Historique Diags")
                 dh = dm.get_diagnostic_history(v_id)
                 if dh:
                     dfh = pd.DataFrame(dh)
                     if 'Date_Detection' in dfh.columns:
                         st.dataframe(dfh[['Date_Detection', 'Resume_IA']], hide_index=True, use_container_width=True)
 
-            # HISTORIQUE (NOTES)
+            # ONGLET NOTES (HISTORIQUE)
             with t2:
                 notes = dm.get_notes_list(v_id)
                 if notes:
@@ -140,7 +143,7 @@ elif menu == "Tableau de bord":
                         d=st.date_input("Date"); t=st.selectbox("Type",["Entretien","Panne"]); tx=st.text_area("Txt")
                         if st.form_submit_button("Ok"): dm.add_note(v_id,t,tx,d); st.rerun()
 
-            # MAINTENANCE
+            # ONGLET MAINTENANCE
             with t3:
                 if st.button("Calculer Plan"):
                     with st.spinner("Calcul..."):
