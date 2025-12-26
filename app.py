@@ -7,104 +7,111 @@ import pandas as pd
 st.set_page_config(page_title="ELGarage SaaS", layout="wide", initial_sidebar_state="collapsed")
 st.markdown("""<style>.stButton>button { height: 3em; width: 100%; border-radius: 10px; font-weight: bold; } .report-container { background-color: #f8f9fa; border: 2px solid #f25c05; border-radius: 10px; padding: 15px; margin-bottom: 20px; } #MainMenu {visibility: hidden;} footer {visibility: hidden;} .block-container { padding-top: 2rem; }</style>""", unsafe_allow_html=True)
 
-# --- INIT ---
 if 'dm' not in st.session_state: st.session_state['dm'] = DataManager()
 dm = st.session_state['dm']
 
-# --- STEP 0 : CONFIGURATION SERVEUR (Pour l'App elle-même) ---
-# L'application doit avoir accès à la table 'users' pour vérifier les logins.
-if 'sys_connected' not in st.session_state: st.session_state['sys_connected'] = False
-
-if not st.session_state['sys_connected']:
-    # 1. On essaie les secrets Streamlit (Cloud)
+# Tentative de connexion silencieuse (si clés en cache ou secrets)
+if not dm.db_ready:
+    # 1. Via Secrets (Cloud)
     try:
-        if dm.connect_system_db(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"]):
-            st.session_state['sys_connected'] = True
-            st.rerun()
-    except: pass
+        dm.connect_system_db(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
+    except:
+        # 2. Via Session State (Si on vient de se déconnecter/recharger)
+        if 'sys_url' in st.session_state:
+            dm.connect_system_db(st.session_state['sys_url'], st.session_state['sys_key'])
 
-    # 2. Sinon, on demande manuellement (Première fois / Local)
-    if not st.session_state['sys_connected']:
-        st.warning("⚙️ Config Serveur (Connexion Table Users)")
-        sys_url = st.text_input("URL Supabase (Projet)")
-        sys_key = st.text_input("Key Supabase (Anon)")
-        if st.button("Initialiser Système"):
-            if dm.connect_system_db(sys_url, sys_key):
-                st.session_state['sys_connected'] = True
-                st.rerun()
-            else: st.error("Connexion échouée.")
-        st.stop()
-
-# --- STEP 1 : LOGIN / REGISTER ---
+# --- LOGIQUE D'AUTHENTIFICATION ---
 if 'user_logged_in' not in st.session_state: st.session_state['user_logged_in'] = False
 
 if not st.session_state['user_logged_in']:
-    st.title("🚗 ELGarage Auth")
-    t1, t2 = st.tabs(["🔑 Connexion", "📝 Inscription (Nouveau)"])
+    col_logo, col_title = st.columns([1, 4])
+    with col_logo: st.markdown("<h1>🚗</h1>", unsafe_allow_html=True)
+    with col_title: st.title("ELGarage")
     
-    with t1:
-        email = st.text_input("Email")
-        pwd = st.text_input("Mot de passe", type="password")
+    tab_login, tab_register = st.tabs(["Connexion", "Créer un compte (Setup)"])
+    
+    # --- ONGLET CONNEXION ---
+    with tab_login:
+        email = st.text_input("Email", key="log_email")
+        pwd = st.text_input("Mot de passe", type="password", key="log_pwd")
         if st.button("Se connecter", type="primary"):
-            ok, msg = dm.login_user(email, pwd)
-            if ok:
-                st.session_state['user_logged_in'] = True
-                # Charger l'IA avec la clé sauvegardée
-                keys = dm.get_user_api_keys()
-                if keys and keys.get('groq'):
-                    st.session_state['ai'] = AIEngine(api_key=keys['groq'])
-                st.success(msg)
-                st.rerun()
-            else: st.error(msg)
-
-    with t2:
-        st.info("Enregistrez vos clés une seule fois ici.")
-        new_nom = st.text_input("Nom complet")
-        new_mail = st.text_input("Email (Inscription)")
-        new_pass = st.text_input("Mot de passe (Inscription)", type="password")
-        st.markdown("---")
-        new_groq = st.text_input("Clé API Groq (gsk_...)", type="password")
-        # Optionnel : Clés Supabase perso, sinon utilise celle du système
-        st.caption("Base de données personnelle (Optionnel)")
-        new_sb_url = st.text_input("URL Supabase Perso (Laisser vide par défaut)")
-        new_sb_key = st.text_input("Key Supabase Perso (Laisser vide par défaut)", type="password")
-        
-        if st.button("Créer Compte"):
-            if new_nom and new_mail and new_pass and new_groq:
-                ok, msg = dm.register_user(new_nom, new_mail, new_pass, new_groq, new_sb_url, new_sb_key)
+            if not dm.db_ready:
+                st.error("⚠️ Le serveur n'est pas connecté. Si vous êtes le propriétaire, allez dans l'onglet 'Créer un compte' pour initialiser la connexion avec vos clés.")
+            else:
+                ok, msg = dm.login_user(email, pwd)
                 if ok:
                     st.session_state['user_logged_in'] = True
-                    st.session_state['ai'] = AIEngine(api_key=new_groq)
-                    st.success("Compte créé !")
+                    keys = dm.get_user_api_keys()
+                    if keys and keys.get('groq'):
+                        st.session_state['ai'] = AIEngine(api_key=keys['groq'])
+                    st.success("Connexion réussie !")
                     st.rerun()
                 else: st.error(msg)
-            else: st.warning("Champs obligatoires manquants.")
-    st.stop()
 
-# --- STEP 2 : APPLICATION ---
+    # --- ONGLET INSCRIPTION (AVEC INIT SYSTEME) ---
+    with tab_register:
+        st.caption("C'est ici que vous initialisez l'application si c'est la première fois.")
+        
+        c1, c2 = st.columns(2)
+        new_nom = c1.text_input("Nom complet")
+        new_mail = c2.text_input("Email")
+        new_pass = st.text_input("Mot de passe", type="password")
+        new_groq = st.text_input("Clé API Groq (gsk_...)", type="password")
+        
+        st.markdown("---")
+        st.subheader("🛠️ Initialisation Système")
+        st.caption("Requis uniquement pour le premier lancement ou nouvel utilisateur.")
+        sys_url = st.text_input("URL Supabase (Projet)", value=st.session_state.get('sys_url', ''))
+        sys_key = st.text_input("Key Supabase (Anon)", type="password", value=st.session_state.get('sys_key', ''))
+
+        if st.button("S'inscrire & Initialiser"):
+            # 1. On essaie de connecter la DB avec les clés fournies
+            if dm.connect_system_db(sys_url, sys_key):
+                # On sauvegarde les clés en session pour ne pas les perdre au reload
+                st.session_state['sys_url'] = sys_url
+                st.session_state['sys_key'] = sys_key
+                
+                # 2. On crée le compte
+                if new_nom and new_mail and new_pass and new_groq:
+                    ok, msg = dm.register_user(new_nom, new_mail, new_pass, new_groq)
+                    if ok:
+                        st.session_state['user_logged_in'] = True
+                        st.session_state['ai'] = AIEngine(api_key=new_groq)
+                        st.success("Compte créé et Système connecté !")
+                        st.rerun()
+                    else: st.error(f"Connexion DB OK, mais erreur création compte : {msg}")
+                else: st.warning("Veuillez remplir les infos personnelles.")
+            else:
+                st.error("Impossible de connecter Supabase. Vérifiez URL et Key.")
+    
+    st.stop() # Bloque le reste de l'app tant que pas connecté
+
+# =========================================================
+#  APPLICATION PRINCIPALE (Une fois connecté)
+# =========================================================
+
 user = st.session_state['dm'].current_user
-# Si Admin (ID 1), on le signale
-role_badge = "🔴 ADMIN" if user['id'] == 1 else "🟢 User"
+role = "ADMIN 🔴" if user['id'] == 1 else "User 🟢"
 
 c1, c2 = st.columns([3, 1])
 with c1: st.title(f"Atelier de {user['nom']}")
 with c2: 
-    st.write(f"Statut : {role_badge}")
+    st.caption(f"Statut : {role}")
     if st.button("Déconnexion"):
         st.session_state['user_logged_in'] = False
         st.rerun()
 
-# Vérif IA
+# Chargement IA de secours
 if 'ai' not in st.session_state:
     k = dm.get_user_api_keys()
     if k and k.get('groq'): st.session_state['ai'] = AIEngine(k['groq'])
-    else: st.error("Clé IA introuvable. Reconnectez-vous."); st.stop()
+    else: st.error("Clé IA manquante. Reconnectez-vous."); st.stop()
 ai = st.session_state['ai']
 
 menu = st.radio("Navigation", ["Tableau de bord", "Nouveau Véhicule"], horizontal=True)
 
 if menu == "Nouveau Véhicule":
-    st.subheader("Ajout Véhicule")
+    st.subheader("Nouveau Véhicule")
     with st.form("addv"):
         nom=st.text_input("Propriétaire"); c1,c2=st.columns(2)
         marq=c1.text_input("Marque"); mod=c2.text_input("Modèle")
