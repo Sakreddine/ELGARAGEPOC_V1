@@ -95,10 +95,8 @@ class DataManager:
         except: return []
 
     def get_all_vehicles_admin(self):
-        """Récupère la totalité des colonnes pour l'Admin"""
         if not self.db_ready: return pd.DataFrame()
         try:
-            # select("*") récupère bien toutes les colonnes définies dans le SQL
             res = self.supabase.table('vehicules').select("*").execute()
             return pd.DataFrame(res.data)
         except: return pd.DataFrame()
@@ -115,8 +113,6 @@ class DataManager:
     def add_vehicle(self, info):
         if not self.db_ready: return False
         try:
-            # On insère les infos de base disponibles dans le formulaire client
-            # Les autres champs resteront NULL (vides) jusqu'à ce que l'admin les complète
             row = {
                 'user_id': self.current_user['id'], 
                 'nom': info.get('Nom'), 
@@ -136,9 +132,13 @@ class DataManager:
     def admin_update_vehicle(self, v_id, updates):
         if not self.db_ready: return
         try:
+            # Liste des champs interdits à la modification technique
             forbidden = ['marque', 'modele', 'immatriculation', 'annee', 'id', 'user_id']
+            # On nettoie le dictionnaire pour ne garder que ce qui est autorisé
             safe_updates = {k: v for k, v in updates.items() if k not in forbidden}
+            
             self.supabase.table('vehicules').update(safe_updates).eq('id', v_id).execute()
+            self.log_action(self.current_user['id'], "ADMIN_VEHICLE_EDIT", f"Update véhicule {v_id}")
             return True
         except Exception as e:
             st.error(str(e)); return False
@@ -197,6 +197,6 @@ class DataManager:
         txt = "--- HISTORIQUE ---\n"
         for n in self.get_notes_list(v_id): txt += f"- {n['Date_Intervention']} : {n['Type']} - {n['Notes']}\n"
         return txt
-        return txt
+
 
 
