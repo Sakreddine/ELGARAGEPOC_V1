@@ -4,23 +4,22 @@ from ai_engine import AIEngine
 from datetime import date
 import pandas as pd
 
-# CONFIGURATION PAGE
 st.set_page_config(page_title="ELGarage SaaS", layout="wide", initial_sidebar_state="collapsed")
 st.markdown("""<style>.stButton>button { height: 3em; width: 100%; border-radius: 10px; font-weight: bold; } .report-container { background-color: #f8f9fa; border: 2px solid #f25c05; border-radius: 10px; padding: 15px; margin-bottom: 20px; } #MainMenu {visibility: hidden;} footer {visibility: hidden;} .block-container { padding-top: 2rem; }</style>""", unsafe_allow_html=True)
 
-# INIT DATA MANAGER
 if 'dm' not in st.session_state: st.session_state['dm'] = DataManager()
 dm = st.session_state['dm']
 
-# VÉRIFICATION CONNEXION DB (Critique)
 if not dm.db_ready:
-    st.error("🔴 Erreur Secrets : Veuillez configurer .streamlit/secrets.toml avec les clés Supabase.")
+    st.error("🔴 Erreur Secrets : Configurez .streamlit/secrets.toml")
     st.stop()
 
-# RECUPERATION ETAT MAINTENANCE & CLE
 settings = dm.get_app_settings()
 IS_MAINTENANCE = settings['maintenance_mode'] if settings else True
 ACTIVE_KEY = settings['groq_api_key'] if settings else None
+
+# --- GESTION MESSAGE SUCCÈS (USER) ---
+if 'success_add_vehicle' not in st.session_state: st.session_state['success_add_vehicle'] = False
 
 # ==============================================================================
 #  LOGIN
@@ -48,12 +47,9 @@ if not st.session_state['user_logged_in']:
                     dm.current_user = None
                 else:
                     st.session_state['user_logged_in'] = True
-                    # IA active globalement ET pour ce user ?
                     user_can_ai = dm.current_user.get('ai_allowed', False)
-                    # L'admin a toujours l'IA si la clé existe
                     if role == 'admin' and ACTIVE_KEY:
                          st.session_state['ai'] = AIEngine(api_key=ACTIVE_KEY)
-                    # Le user a l'IA seulement si pas maintenance ET autorisé
                     elif not IS_MAINTENANCE and ACTIVE_KEY and user_can_ai:
                         st.session_state['ai'] = AIEngine(api_key=ACTIVE_KEY)
                     st.rerun()
@@ -78,10 +74,8 @@ role = user.get('role', 'user')
 ai_allowed = user.get('ai_allowed', False)
 ai = st.session_state.get('ai')
 
-# Double vérification des droits IA en temps réel
 if ai and role != 'admin':
-    if (not ai_allowed) or IS_MAINTENANCE:
-        ai = None
+    if (not ai_allowed) or IS_MAINTENANCE: ai = None
 
 c1, c2 = st.columns([3, 1])
 with c1: 
@@ -97,7 +91,7 @@ with c2:
 # --- ADMIN ---
 if role == 'admin':
     st.divider()
-    t1, t2, t3, t4 = st.tabs(["⚙️ Config", "👥 Gestion Users", "🚗 Flotte & Édition", "📊 Stats"])
+    t1, t2, t3, t4 = st.tabs(["⚙️ Config", "👥 Users", "🚗 Flotte Complète", "📊 Stats"])
     
     with t1:
         st.subheader("Global Settings")
@@ -110,7 +104,7 @@ if role == 'admin':
                 dm.toggle_maintenance(True); st.rerun()
 
     with t2:
-        st.subheader("Gérer les droits IA")
+        st.subheader("Droits IA")
         df_u = dm.get_all_users()
         if not df_u.empty:
             for i, row in df_u.iterrows():
@@ -119,35 +113,52 @@ if role == 'admin':
                 c2.write(f"**{row['nom']}**")
                 c3.write(row['email'])
                 is_on = row['ai_allowed']
-                # Toggle unique key
                 if c4.toggle("IA", value=is_on, key=f"tg_{row['id']}"):
                     if not is_on: dm.toggle_user_ai(row['id'], True)
                 else:
                     if is_on: dm.toggle_user_ai(row['id'], False)
 
     with t3:
-        st.subheader("Édition Véhicules")
+        st.subheader("Flotte Complète (Détails Techniques)")
         vl = dm.get_vehicle_list()
+        
+        # 1. TABLEAU COMPLET
+        st.write("Vue d'ensemble de toutes les données véhicules :")
+        full_data = dm.get_all_vehicles_admin()
+        if not full_data.empty:
+            st.dataframe(full_data, use_container_width=True)
+        else:
+            st.info("Aucun véhicule.")
+
+        st.divider()
+
+        # 2. EDITION
         if vl:
-            sel = st.selectbox("Choisir véhicule à modifier", vl, format_func=lambda x: x[1])
+            st.subheader("✏️ Éditer un véhicule")
+            sel = st.selectbox("Sélectionner véhicule", vl, format_func=lambda x: x[1])
             vid = sel[0]
             v_data = dm.get_vehicle_info(vid)
             
             if v_data:
-                st.info(f"Véhicule : {v_data.get('marque')} {v_data.get('modele')} ({v_data.get('immatriculation')}) - {v_data.get('annee')}")
-                st.caption("🔒 Les champs ci-dessus sont verrouillés (Identity). Modifiez les détails techniques ci-dessous :")
+                st.info(f"Édition : {v_data.get('marque')} {v_data.get('modele')} ({v_data.get('immatriculation')})")
                 
                 with st.form("edit_v"):
                     c1, c2 = st.columns(2)
+                    # Champs techniques éditables
                     n_km = c1.number_input("Kilométrage", value=v_data.get('km_actuel', 0))
                     n_col = c2.text_input("Couleur", value=v_data.get('couleur', ''))
                     n_boite = c1.text_input("Boite Vitesse", value=v_data.get('boite_vitesse', ''))
                     n_carb = c2.text_input("Carburant", value=v_data.get('carburant', ''))
+                    n_vin = c1.text_input("VIN", value=v_data.get('vin', ''))
+                    n_pf = c2.number_input("Puissance Fiscale", value=v_data.get('puissance_fiscale', 0))
                     
                     if st.form_submit_button("Enregistrer modifications"):
-                        changes = {'km_actuel': n_km, 'couleur': n_col, 'boite_vitesse': n_boite, 'carburant': n_carb}
+                        changes = {
+                            'km_actuel': n_km, 'couleur': n_col, 'boite_vitesse': n_boite, 
+                            'carburant': n_carb, 'vin': n_vin, 'puissance_fiscale': n_pf
+                        }
                         if dm.admin_update_vehicle(vid, changes):
-                            st.success("Mis à jour !"); st.rerun()
+                            st.success("Véhicule mis à jour !"); st.rerun()
 
     with t4:
         st.json(dm.get_app_stats())
@@ -157,12 +168,23 @@ else:
     nav = st.radio("Menu", ["Mes Véhicules", "Ajouter"], horizontal=True)
 
     if nav == "Ajouter":
+        st.subheader("Ajouter un véhicule")
+        
+        # Affichage du message de succès si présent
+        if st.session_state['success_add_vehicle']:
+            st.success("✅ Véhicule ajouté avec succès ! Vous pouvez le retrouver dans 'Mes Véhicules'.")
+            st.balloons()
+            st.session_state['success_add_vehicle'] = False # Reset
+
         with st.form("a"):
-            n=st.text_input("Nom"); c1,c2=st.columns(2); ma=c1.text_input("Marque"); mo=c2.text_input("Modèle")
+            n=st.text_input("Nom (ex: Ma voiture)"); c1,c2=st.columns(2); ma=c1.text_input("Marque"); mo=c2.text_input("Modèle")
             im=st.text_input("Immat"); km=st.number_input("KM",0); an=st.number_input("Année",2000)
-            if st.form_submit_button("Ajouter"):
-                dm.add_vehicle({"Nom":n,"Marque":ma,"Modele":mo,"Immatriculation":im,"Annee":an,"KM_Actuel":km})
-                st.success("OK"); st.rerun()
+            if st.form_submit_button("Ajouter", type="primary"):
+                if dm.add_vehicle({"Nom":n,"Marque":ma,"Modele":mo,"Immatriculation":im,"Annee":an,"KM_Actuel":km}):
+                    st.session_state['success_add_vehicle'] = True
+                    st.rerun()
+                else:
+                    st.error("Erreur lors de l'ajout.")
     else:
         vl = dm.get_vehicle_list()
         if not vl: st.info("Vide.")
