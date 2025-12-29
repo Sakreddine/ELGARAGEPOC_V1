@@ -4,17 +4,20 @@ from ai_engine import AIEngine
 from datetime import date
 import pandas as pd
 
+# CONFIGURATION PAGE
 st.set_page_config(page_title="ELGarage SaaS", layout="wide", initial_sidebar_state="collapsed")
 st.markdown("""<style>.stButton>button { height: 3em; width: 100%; border-radius: 10px; font-weight: bold; } .report-container { background-color: #f8f9fa; border: 2px solid #f25c05; border-radius: 10px; padding: 15px; margin-bottom: 20px; } #MainMenu {visibility: hidden;} footer {visibility: hidden;} .block-container { padding-top: 2rem; }</style>""", unsafe_allow_html=True)
 
+# INIT DATA MANAGER
 if 'dm' not in st.session_state: st.session_state['dm'] = DataManager()
 dm = st.session_state['dm']
 
+# VÉRIFICATION CONNEXION DB (Critique)
 if not dm.db_ready:
-    st.error("🔴 Erreur Secrets : Configurez .streamlit/secrets.toml")
+    st.error("🔴 Erreur Secrets : Veuillez configurer .streamlit/secrets.toml avec les clés Supabase.")
     st.stop()
 
-# Charger Settings
+# RECUPERATION ETAT MAINTENANCE & CLE
 settings = dm.get_app_settings()
 IS_MAINTENANCE = settings['maintenance_mode'] if settings else True
 ACTIVE_KEY = settings['groq_api_key'] if settings else None
@@ -47,7 +50,11 @@ if not st.session_state['user_logged_in']:
                     st.session_state['user_logged_in'] = True
                     # IA active globalement ET pour ce user ?
                     user_can_ai = dm.current_user.get('ai_allowed', False)
-                    if not IS_MAINTENANCE and ACTIVE_KEY and user_can_ai:
+                    # L'admin a toujours l'IA si la clé existe
+                    if role == 'admin' and ACTIVE_KEY:
+                         st.session_state['ai'] = AIEngine(api_key=ACTIVE_KEY)
+                    # Le user a l'IA seulement si pas maintenance ET autorisé
+                    elif not IS_MAINTENANCE and ACTIVE_KEY and user_can_ai:
                         st.session_state['ai'] = AIEngine(api_key=ACTIVE_KEY)
                     st.rerun()
             else: st.error(msg)
@@ -71,9 +78,10 @@ role = user.get('role', 'user')
 ai_allowed = user.get('ai_allowed', False)
 ai = st.session_state.get('ai')
 
-# Enforce User AI Right check
-if ai and (not ai_allowed) and role != 'admin':
-    ai = None # Désactiver localement si l'admin a coupé l'accès
+# Double vérification des droits IA en temps réel
+if ai and role != 'admin':
+    if (not ai_allowed) or IS_MAINTENANCE:
+        ai = None
 
 c1, c2 = st.columns([3, 1])
 with c1: 
@@ -105,14 +113,13 @@ if role == 'admin':
         st.subheader("Gérer les droits IA")
         df_u = dm.get_all_users()
         if not df_u.empty:
-            # Affichage liste avec Toggle
             for i, row in df_u.iterrows():
                 c1, c2, c3, c4 = st.columns([1, 2, 2, 1])
                 c1.write(f"ID: {row['id']}")
                 c2.write(f"**{row['nom']}**")
                 c3.write(row['email'])
-                # Toggle pour activer/désactiver IA
                 is_on = row['ai_allowed']
+                # Toggle unique key
                 if c4.toggle("IA", value=is_on, key=f"tg_{row['id']}"):
                     if not is_on: dm.toggle_user_ai(row['id'], True)
                 else:
@@ -120,7 +127,7 @@ if role == 'admin':
 
     with t3:
         st.subheader("Édition Véhicules")
-        vl = dm.get_vehicle_list() # Tous les vehicules
+        vl = dm.get_vehicle_list()
         if vl:
             sel = st.selectbox("Choisir véhicule à modifier", vl, format_func=lambda x: x[1])
             vid = sel[0]
@@ -169,7 +176,7 @@ else:
                 
                 with t1:
                     if not ai: 
-                        if not ai_allowed: st.error("🔒 Votre abonnement ne permet pas l'utilisation de l'IA. Contactez l'admin.")
+                        if not ai_allowed: st.error("🔒 IA non autorisée.")
                         else: st.warning("IA en maintenance.")
                     
                     with st.form("d"):
@@ -197,6 +204,6 @@ else:
                 with t3:
                     if st.button("Plan", disabled=(ai is None)):
                         r = ai.check_maintenance_schedule(inf, dm.get_full_history_text(vid))
-                        if "error" not in r: st.markdown(r['response']); dm.save_echeance(vid, r['response'])
-                            if "error" not in r: st.markdown(r['response']); dm.save_echeance(vid, r['response'])
-
+                        if "error" not in r:
+                            st.markdown(r['response'])
+                            dm.save_echeance(vid, r['response'])
