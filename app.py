@@ -4,182 +4,235 @@ from ai_engine import AIEngine
 from datetime import date
 import pandas as pd
 
+# ==============================================================================
+#  CONFIGURATION GLOBALE (Mode SaaS Centralisé)
+# ==============================================================================
+# Ces clés permettent à l'application de fonctionner pour TOUS les utilisateurs.
+# L'utilisateur final n'a PAS besoin de fournir ses propres clés.
+ADMIN_SB_URL = "https://ljdzsqpzbxtrptdaftur.supabase.co" # Votre URL Supabase
+ADMIN_SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."  # Votre Clé Supabase (Anon)
+ADMIN_GROQ_KEY = "gsk_..."                                # Votre Clé API Groq
+
 st.set_page_config(page_title="ELGarage SaaS", layout="wide", initial_sidebar_state="collapsed")
 st.markdown("""<style>.stButton>button { height: 3em; width: 100%; border-radius: 10px; font-weight: bold; } .report-container { background-color: #f8f9fa; border: 2px solid #f25c05; border-radius: 10px; padding: 15px; margin-bottom: 20px; } #MainMenu {visibility: hidden;} footer {visibility: hidden;} .block-container { padding-top: 2rem; }</style>""", unsafe_allow_html=True)
 
 if 'dm' not in st.session_state: st.session_state['dm'] = DataManager()
 dm = st.session_state['dm']
 
-# ==============================================================================
-#  ZONE ADMIN / DÉVELOPPEUR (Remplissez ici pour connexion auto)
-# ==============================================================================
-# Copiez ces infos depuis Supabase > Project Settings > API
-ADMIN_SB_URL = "https://ljdzsqpzbxtrptdaftur.supabase.co"  # << REMPLACEZ ICI
-ADMIN_SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxqZHpzcXB6Ynh0cnB0ZGFmdHVyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY3NjA3NTIsImV4cCI6MjA4MjMzNjc1Mn0.Z0IaWz901FG360CrGMHAQBdDJ88md2p2mpCe-Y5yOVY"         # << REMPLACEZ ICI
-# ==============================================================================
-
-# --- TENTATIVE DE CONNEXION AUTOMATIQUE ---
+# --- CONNEXION AUTOMATIQUE AU SYSTEME ---
+# L'app se connecte avec les clés de l'Admin au démarrage
 if not dm.db_ready:
-    # 1. On essaie avec les clés "En dur" ci-dessus (Priorité DEV)
-    if "votre-projet" not in ADMIN_SB_URL and "votre-cle" not in ADMIN_SB_KEY:
-        if dm.connect_system_db(ADMIN_SB_URL, ADMIN_SB_KEY):
-            # Succès silencieux, on ne dit rien, ça marche juste.
-            pass
-
-    # 2. Si ça a raté, on essaie via les Secrets (Cloud)
+    # 1. Clés Hardcoded (Priorité)
+    if "votre-url" not in ADMIN_SB_URL:
+        dm.connect_system_db(ADMIN_SB_URL, ADMIN_SB_KEY)
+    # 2. Clés Secrets (Fallback)
     if not dm.db_ready:
-        try:
-            dm.connect_system_db(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
+        try: dm.connect_system_db(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
         except: pass
 
-    # 3. Si ça a raté, on essaie via le cache de session
-    if not dm.db_ready and 'sys_url' in st.session_state:
-        dm.connect_system_db(st.session_state['sys_url'], st.session_state['sys_key'])
-
-
-# --- UI AUTHENTIFICATION ---
+# ==============================================================================
+#  ECRAN D'AUTHENTIFICATION
+# ==============================================================================
 if 'user_logged_in' not in st.session_state: st.session_state['user_logged_in'] = False
 
 if not st.session_state['user_logged_in']:
-    col_logo, col_title = st.columns([1, 4])
-    with col_logo: st.markdown("<h1>🚗</h1>", unsafe_allow_html=True)
-    with col_title: st.title("ELGarage")
+    c1, c2 = st.columns([1, 4])
+    with c1: st.markdown("# 🚗")
+    with c2: st.title("ELGarage Login")
     
-    # Indicateur de statut serveur
-    if dm.db_ready:
-        st.caption("🟢 Serveur connecté (Mode Admin Hardcoded)")
-    else:
-        st.warning("🔴 Serveur déconnecté. Veuillez configurer les clés dans l'onglet 'Créer un compte'.")
+    if not dm.db_ready:
+        st.error("❌ Erreur Serveur : Clés API Admin non configurées dans le code.")
+        st.stop()
 
-    tab_login, tab_register = st.tabs(["Connexion", "Créer un compte (Setup)"])
-    
-    # --- ONGLET CONNEXION ---
-    with tab_login:
+    tab_conn, tab_insc = st.tabs(["Connexion", "Inscription (Nouveau)"])
+
+    # --- CONNEXION ---
+    with tab_conn:
         email = st.text_input("Email", key="log_email")
         pwd = st.text_input("Mot de passe", type="password", key="log_pwd")
-        
         if st.button("Se connecter", type="primary"):
-            if not dm.db_ready:
-                st.error("Serveur non connecté. Vérifiez vos variables ADMIN_SB_URL dans le code.")
+            ok, msg = dm.login_user(email, pwd)
+            if ok:
+                st.session_state['user_logged_in'] = True
+                # Initialisation IA avec la clé ADMIN globale
+                if "gsk_" in ADMIN_GROQ_KEY:
+                    st.session_state['ai'] = AIEngine(api_key=ADMIN_GROQ_KEY)
+                else:
+                    st.warning("⚠️ Clé IA (Groq) non configurée dans le code. L'IA ne fonctionnera pas.")
+                st.success("Bienvenue !")
+                st.rerun()
             else:
-                ok, msg = dm.login_user(email, pwd)
+                st.error(msg)
+
+    # --- INSCRIPTION (Utilisateur Standard) ---
+    with tab_insc:
+        st.caption("Créez votre compte pour gérer vos véhicules.")
+        new_nom = st.text_input("Nom complet")
+        new_mail = st.text_input("Email")
+        new_pass = st.text_input("Mot de passe", type="password")
+        st.info("ℹ️ Vous n'avez pas besoin de clé API. Le service est entièrement géré.")
+        
+        if st.button("S'inscrire"):
+            if new_nom and new_mail and new_pass:
+                ok, msg = dm.register_user(new_nom, new_mail, new_pass)
                 if ok:
                     st.session_state['user_logged_in'] = True
-                    keys = dm.get_user_api_keys()
-                    if keys and keys.get('groq'):
-                        st.session_state['ai'] = AIEngine(api_key=keys['groq'])
-                    st.success("Connexion réussie !")
+                    # Init IA
+                    if "gsk_" in ADMIN_GROQ_KEY: st.session_state['ai'] = AIEngine(api_key=ADMIN_GROQ_KEY)
+                    st.success("Compte créé avec succès !")
                     st.rerun()
                 else: st.error(msg)
-
-    # --- ONGLET INSCRIPTION ---
-    with tab_register:
-        st.caption("Création de compte + Initialisation manuelle si besoin.")
-        
-        c1, c2 = st.columns(2)
-        new_nom = c1.text_input("Nom complet")
-        new_mail = c2.text_input("Email")
-        new_pass = st.text_input("Mot de passe", type="password")
-        new_groq = st.text_input("Clé API Groq (gsk_...)", type="password")
-        
-        st.markdown("---")
-        with st.expander("Configuration Système (Si pas connecté auto)"):
-            # On pré-remplit avec les valeurs hardcodées si elles existent
-            val_url = ADMIN_SB_URL if "votre-projet" not in ADMIN_SB_URL else ""
-            val_key = ADMIN_SB_KEY if "votre-cle" not in ADMIN_SB_KEY else ""
-            
-            sys_url = st.text_input("URL Supabase", value=val_url)
-            sys_key = st.text_input("Key Supabase", type="password", value=val_key)
-
-        if st.button("S'inscrire & Initialiser"):
-            # 1. Connexion DB
-            if not dm.db_ready:
-                if dm.connect_system_db(sys_url, sys_key):
-                    st.session_state['sys_url'] = sys_url
-                    st.session_state['sys_key'] = sys_key
-                else:
-                    st.error("Impossible de connecter la base de données.")
-                    st.stop()
-            
-            # 2. Création User
-            if new_nom and new_mail and new_pass and new_groq:
-                ok, msg = dm.register_user(new_nom, new_mail, new_pass, new_groq)
-                if ok:
-                    st.session_state['user_logged_in'] = True
-                    st.session_state['ai'] = AIEngine(api_key=new_groq)
-                    st.success("Compte créé !")
-                    st.rerun()
-                else: st.error(f"Erreur création : {msg}")
-            else: st.warning("Remplissez tous les champs personnels.")
+            else: st.warning("Veuillez remplir tous les champs.")
     
     st.stop()
 
-# =========================================================
-#  APPLICATION PRINCIPALE (Une fois connecté)
-# =========================================================
+# ==============================================================================
+#  APPLICATION CONNECTEE (Routeur Admin vs User)
+# ==============================================================================
 
 user = st.session_state['dm'].current_user
-role = "ADMIN 🔴" if user['id'] == 1 else "User 🟢"
+role = user.get('role', 'user')
 
+# Header Commun
 c1, c2 = st.columns([3, 1])
-with c1: st.title(f"Atelier de {user['nom']}")
+with c1: 
+    badge = "🔴 ADMIN" if role == 'admin' else "🟢 CLIENT"
+    st.title(f"Espace {user['nom']}")
+    st.caption(f"Statut : {badge}")
 with c2: 
-    st.caption(f"Statut : {role}")
     if st.button("Déconnexion"):
         st.session_state['user_logged_in'] = False
         st.rerun()
 
-# Chargement IA
+# Vérification IA
 if 'ai' not in st.session_state:
-    k = dm.get_user_api_keys()
-    if k and k.get('groq'): st.session_state['ai'] = AIEngine(k['groq'])
-    else: st.error("Clé IA manquante. Reconnectez-vous."); st.stop()
-ai = st.session_state['ai']
-
-menu = st.radio("Navigation", ["Tableau de bord", "Nouveau Véhicule"], horizontal=True)
-
-if menu == "Nouveau Véhicule":
-    st.subheader("Nouveau Véhicule")
-    with st.form("addv"):
-        nom=st.text_input("Propriétaire"); c1,c2=st.columns(2)
-        marq=c1.text_input("Marque"); mod=c2.text_input("Modèle")
-        immat=c1.text_input("Immat"); km=c2.number_input("KM",0); an=st.number_input("Année",1990,2030,2015)
-        if st.form_submit_button("Ajouter", type="primary"):
-            dm.add_vehicle({"Nom":nom,"Marque":marq,"Modele":mod,"Immatriculation":immat,"Annee":an,"KM_Actuel":km})
-            st.success("OK"); st.rerun()
-
-elif menu == "Tableau de bord":
-    v_list = dm.get_vehicle_list()
-    if not v_list: st.info("Aucun véhicule.")
+    if "gsk_" in ADMIN_GROQ_KEY:
+         st.session_state['ai'] = AIEngine(api_key=ADMIN_GROQ_KEY)
     else:
-        sel = st.selectbox("Véhicule", v_list, format_func=lambda x: x[1])
-        v_id = sel[0]
-        v_info = dm.get_vehicle_info(v_id)
-        if v_info:
-            st.markdown(f"### {v_info['Marque']} {v_info['Modele']} ({v_info['Immatriculation']})")
-            t1, t2, t3 = st.tabs(["Diag", "Notes", "Maint"])
-            with t1:
-                with st.form("d"):
-                    c=st.text_input("Codes"); s=st.text_area("Symp")
-                    if st.form_submit_button("Analys"):
-                        with st.spinner("..."):
-                            h=dm.get_full_history_text(v_id)
-                            r=ai.analyze_obd(v_info, h, f"{c} {s}", date.today())
-                            if "error" in r: st.error(r['error'])
-                            else: 
-                                st.write(r['resume_court'])
-                                dm.save_diagnostic(v_id, c, str(r), r.get('estimation_cout_pieces_mo'), r.get('sante_vehicule'), date.today(), r.get('resume_court'))
-                                st.success("Saved")
-                dh=dm.get_diagnostic_history(v_id)
-                if dh: st.dataframe(pd.DataFrame(dh)[['Date_Detection','Resume_IA']], hide_index=True)
-            with t2:
-                n=dm.get_notes_list(v_id)
-                if n: st.dataframe(pd.DataFrame(n)[['Date_Intervention','Type','Notes']], hide_index=True)
-                with st.expander("Add"):
-                    with st.form("an"):
-                        d=st.date_input("D"); t=st.selectbox("T",["Entretien","Panne"]); tx=st.text_area("Txt")
-                        if st.form_submit_button("Ok"): dm.add_note(v_id,t,tx,d); st.rerun()
-            with t3:
-                if st.button("Plan"):
-                    r=ai.check_maintenance_schedule(v_info, dm.get_full_history_text(v_id))
-                    if "error" not in r: st.markdown(r['response']); dm.save_echeance(v_id, r['response'])
+        st.error("Service IA indisponible (Clé non configurée).")
+
+ai = st.session_state.get('ai')
+
+# ------------------------------------------------------------------------------
+#  VUE ADMINISTRATEUR
+# ------------------------------------------------------------------------------
+if role == 'admin':
+    st.divider()
+    tabs_admin = st.tabs(["📊 Analytics", "👥 Gestion Utilisateurs", "🚗 Flotte Globale", "⚙️ Paramètres & IA"])
+
+    # 1. Analytics
+    with tabs_admin[0]:
+        st.subheader("Vue d'ensemble de l'application")
+        stats = dm.get_app_stats()
+        k1, k2, k3 = st.columns(3)
+        k1.metric("Utilisateurs", stats.get('users', 0))
+        k2.metric("Véhicules enregistrés", stats.get('vehicles', 0))
+        k3.metric("Logs Activité", stats.get('logs', 0))
+        st.info("Graphiques détaillés à venir dans la version Prod.")
+
+    # 2. Utilisateurs
+    with tabs_admin[1]:
+        st.subheader("Base de données Clients")
+        df_users = dm.get_all_users()
+        if not df_users.empty:
+            st.dataframe(df_users, use_container_width=True)
+        else: st.write("Aucun utilisateur.")
+
+    # 3. Tous les véhicules
+    with tabs_admin[2]:
+        st.subheader("Tous les véhicules du système")
+        df_cars = dm.get_all_vehicles_admin()
+        if not df_cars.empty:
+            st.dataframe(df_cars, use_container_width=True)
+        else: st.write("Aucun véhicule.")
+
+    # 4. Paramètres
+    with tabs_admin[3]:
+        st.subheader("Configuration de l'App")
+        st.text_input("Nom de l'application", value="ELGarage")
+        st.toggle("Mode Maintenance (Bloquer l'accès public)", value=False)
+        st.divider()
+        st.subheader("Gestion IA (Groq)")
+        st.selectbox("Modèle IA Déployé", ["llama-3.3-70b-versatile", "mixtral-8x7b"], index=0)
+        st.caption(f"Clé API active : {ADMIN_GROQ_KEY[:5]}...********")
+
+# ------------------------------------------------------------------------------
+#  VUE UTILISATEUR STANDARD
+# ------------------------------------------------------------------------------
+else:
+    nav = st.radio("Navigation :", ["Mes Véhicules", "Ajouter un véhicule"], horizontal=True)
+
+    if nav == "Ajouter un véhicule":
+        st.subheader("Ajouter un nouveau véhicule")
+        with st.form("add_v_form"):
+            nom = st.text_input("Nom (ex: Ma voiture pro)")
+            c1, c2 = st.columns(2)
+            marq = c1.text_input("Marque"); mod = c2.text_input("Modèle")
+            immat = c1.text_input("Immatriculation"); km = c2.number_input("Kilométrage", 0); an = st.number_input("Année", 2000)
+            
+            if st.form_submit_button("Ajouter à mon garage", type="primary"):
+                dm.add_vehicle({"Nom":nom, "Marque":marq, "Modele":mod, "Immatriculation":immat, "Annee":an, "KM_Actuel":km})
+                st.success("Véhicule ajouté avec succès !"); st.rerun()
+
+    elif nav == "Mes Véhicules":
+        v_list = dm.get_vehicle_list()
+        if not v_list:
+            st.info("Votre garage est vide. Ajoutez votre premier véhicule !")
+        else:
+            sel = st.selectbox("Choisir un véhicule :", v_list, format_func=lambda x: x[1])
+            v_id = sel[0]
+            v_info = dm.get_vehicle_info(v_id)
+
+            if v_info:
+                st.markdown(f"### 🚘 {v_info['Marque']} {v_info['Modele']}")
+                
+                t_diag, t_notes, t_maint = st.tabs(["⚡ Diagnostic & IA", "📝 Carnet d'entretien", "📅 Maintenance Prédictive"])
+
+                # --- ONGLET DIAGNOSTIC ---
+                with t_diag:
+                    st.write("**Analyseur de pannes (IA)**")
+                    with st.form("diag_form"):
+                        codes = st.text_input("Code(s) défaut OBD2 (ex: P0300)")
+                        symp = st.text_area("Symptômes observés / Conditions")
+                        d_occ = st.date_input("Date d'apparition", date.today())
+                        
+                        if st.form_submit_button("Lancer l'analyse Expert", type="primary"):
+                            if not ai: st.error("IA non disponible"); st.stop()
+                            with st.spinner("Analyse en cours..."):
+                                hist = dm.get_full_history_text(v_id)
+                                res = ai.analyze_obd(v_info, hist, f"{codes} - {symp}", d_occ)
+                                if "error" in res: st.error(res['error'])
+                                else:
+                                    st.success("Rapport généré")
+                                    st.markdown(res['resume_court'])
+                                    dm.save_diagnostic(v_id, codes, str(res), res.get('estimation_cout_pieces_mo'), res.get('sante_vehicule'), d_occ, res.get('resume_court'))
+                    
+                    st.write("---")
+                    st.caption("Historique des analyses")
+                    dh = dm.get_diagnostic_history(v_id)
+                    if dh: st.dataframe(pd.DataFrame(dh)[['Date_Detection', 'Code_Defaut', 'Resume_IA']], hide_index=True, use_container_width=True)
+
+                # --- ONGLET NOTES ---
+                with t_notes:
+                    st.write("**Historique des interventions**")
+                    notes = dm.get_notes_list(v_id)
+                    if notes: st.dataframe(pd.DataFrame(notes)[['Date_Intervention', 'Type', 'Notes']], hide_index=True, use_container_width=True)
+                    
+                    with st.expander("Ajouter une intervention"):
+                        with st.form("note_form"):
+                            d = st.date_input("Date"); t = st.selectbox("Type", ["Entretien", "Réparation", "CT", "Pneu", "Autre"])
+                            desc = st.text_area("Description")
+                            if st.form_submit_button("Sauvegarder"):
+                                dm.add_note(v_id, t, desc, d); st.rerun()
+
+                # --- ONGLET MAINTENANCE ---
+                with t_maint:
+                    st.write("**Plan de maintenance généré par IA**")
+                    if st.button("Générer le rapport PDF (Simulation)"):
+                        with st.spinner("Génération..."):
+                            if ai:
+                                r = ai.check_maintenance_schedule(v_info, dm.get_full_history_text(v_id))
+                                if "error" not in r:
+                                    st.markdown(r['response'])
+                                    dm.save_echeance(v_id, r['response'])
+                                    st.balloons()
