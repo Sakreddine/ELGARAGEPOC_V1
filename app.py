@@ -17,8 +17,6 @@ if not dm.db_ready:
 settings = dm.get_app_settings()
 IS_MAINTENANCE = settings['maintenance_mode'] if settings else True
 ACTIVE_KEY = settings['groq_api_key'] if settings else None
-
-# --- GESTION MESSAGE SUCCÈS (USER) ---
 if 'success_add_vehicle' not in st.session_state: st.session_state['success_add_vehicle'] = False
 
 # ==============================================================================
@@ -119,46 +117,79 @@ if role == 'admin':
                     if is_on: dm.toggle_user_ai(row['id'], False)
 
     with t3:
-        st.subheader("Flotte Complète (Détails Techniques)")
+        st.subheader("Flotte Complète")
         vl = dm.get_vehicle_list()
         
-        # 1. TABLEAU COMPLET
-        st.write("Vue d'ensemble de toutes les données véhicules :")
+        # TABLEAU
         full_data = dm.get_all_vehicles_admin()
-        if not full_data.empty:
-            st.dataframe(full_data, use_container_width=True)
-        else:
-            st.info("Aucun véhicule.")
+        if not full_data.empty: st.dataframe(full_data, use_container_width=True)
 
         st.divider()
 
-        # 2. EDITION
+        # EDITION COMPLETE
         if vl:
-            st.subheader("✏️ Éditer un véhicule")
+            st.subheader("✏️ Éditer les Détails Techniques")
             sel = st.selectbox("Sélectionner véhicule", vl, format_func=lambda x: x[1])
             vid = sel[0]
-            v_data = dm.get_vehicle_info(vid)
+            v = dm.get_vehicle_info(vid)
             
-            if v_data:
-                st.info(f"Édition : {v_data.get('marque')} {v_data.get('modele')} ({v_data.get('immatriculation')})")
+            if v:
+                st.info(f"Édition : {v.get('marque')} {v.get('modele')} ({v.get('immatriculation')})")
                 
-                with st.form("edit_v"):
-                    c1, c2 = st.columns(2)
-                    # Champs techniques éditables
-                    n_km = c1.number_input("Kilométrage", value=v_data.get('km_actuel', 0))
-                    n_col = c2.text_input("Couleur", value=v_data.get('couleur', ''))
-                    n_boite = c1.text_input("Boite Vitesse", value=v_data.get('boite_vitesse', ''))
-                    n_carb = c2.text_input("Carburant", value=v_data.get('carburant', ''))
-                    n_vin = c1.text_input("VIN", value=v_data.get('vin', ''))
-                    n_pf = c2.number_input("Puissance Fiscale", value=v_data.get('puissance_fiscale', 0))
-                    
-                    if st.form_submit_button("Enregistrer modifications"):
-                        changes = {
-                            'km_actuel': n_km, 'couleur': n_col, 'boite_vitesse': n_boite, 
-                            'carburant': n_carb, 'vin': n_vin, 'puissance_fiscale': n_pf
+                with st.form("edit_v_full"):
+                    # GENERAL
+                    with st.expander("📝 Général & Identification", expanded=True):
+                        c1, c2, c3 = st.columns(3)
+                        vin = c1.text_input("VIN", value=v.get('vin') or "")
+                        km = c2.number_input("KM Actuel", value=v.get('km_actuel', 0))
+                        coul = c3.text_input("Couleur", value=v.get('couleur') or "")
+                        
+                        c1, c2, c3 = st.columns(3)
+                        carr = c1.text_input("Carrosserie", value=v.get('carrosserie') or "")
+                        genr = c2.text_input("Genre (VP/CTTE)", value=v.get('genre_v') or "")
+                        dt_circ = c3.date_input("Date Circulation", value=None) # Simplification date
+
+                    # MOTEUR
+                    with st.expander("⚙️ Moteur & Performance"):
+                        c1, c2, c3 = st.columns(3)
+                        p_ch = c1.number_input("Puissance (ch)", value=v.get('puissance_ch', 0))
+                        p_fi = c2.number_input("Puissance Fisc (CV)", value=v.get('puissance_fiscale', 0))
+                        cyl = c3.number_input("Cylindrée (cc)", value=v.get('cylindree', 0))
+                        
+                        c1, c2, c3 = st.columns(3)
+                        mot_c = c1.text_input("Code Moteur", value=v.get('code_moteur') or "")
+                        soup = c2.number_input("Soupapes", value=v.get('soupapes', 0))
+                        co2 = c3.number_input("CO2 (g/km)", value=v.get('co2', 0))
+                        
+                        c1, c2 = st.columns(2)
+                        carb = c1.text_input("Carburant", value=v.get('carburant') or "")
+                        turbo = c2.checkbox("Turbo", value=v.get('turbo', False))
+
+                    # TRANSMISSION
+                    with st.expander("🕹️ Transmission"):
+                        c1, c2, c3 = st.columns(3)
+                        bv = c1.text_input("Boite Vitesse", value=v.get('boite_vitesse') or "")
+                        nb_v = c2.number_input("Nb Rapports", value=v.get('nb_vitesses', 0))
+                        roue = c3.text_input("Roues Motrices", value=v.get('roues_motrices') or "")
+
+                    # DIMENSIONS & FLUIDES
+                    with st.expander("📏 Dimensions & Entretien"):
+                        c1, c2, c3 = st.columns(3)
+                        pds = c1.number_input("Poids (kg)", value=v.get('poids_kg', 0))
+                        hui = c2.text_input("Viscosité Huile", value=v.get('viscosite_huile') or "")
+                        vol_h = c3.number_input("Capacité Huile (L)", value=float(v.get('capacite_huile_l') or 0.0))
+
+                    if st.form_submit_button("Enregistrer Toutes les Modifications"):
+                        # Construction du dictionnaire update
+                        updates = {
+                            'vin': vin, 'km_actuel': km, 'couleur': coul, 'carrosserie': carr, 'genre_v': genr,
+                            'puissance_ch': p_ch, 'puissance_fiscale': p_fi, 'cylindree': cyl, 'code_moteur': mot_c,
+                            'soupapes': soup, 'co2': co2, 'carburant': carb, 'turbo': turbo,
+                            'boite_vitesse': bv, 'nb_vitesses': nb_v, 'roues_motrices': roue,
+                            'poids_kg': pds, 'viscosite_huile': hui, 'capacite_huile_l': vol_h
                         }
-                        if dm.admin_update_vehicle(vid, changes):
-                            st.success("Véhicule mis à jour !"); st.rerun()
+                        if dm.admin_update_vehicle(vid, updates):
+                            st.success("Mise à jour effectuée !"); st.rerun()
 
     with t4:
         st.json(dm.get_app_stats())
@@ -169,22 +200,17 @@ else:
 
     if nav == "Ajouter":
         st.subheader("Ajouter un véhicule")
-        
-        # Affichage du message de succès si présent
         if st.session_state['success_add_vehicle']:
-            st.success("✅ Véhicule ajouté avec succès ! Vous pouvez le retrouver dans 'Mes Véhicules'.")
-            st.balloons()
-            st.session_state['success_add_vehicle'] = False # Reset
+            st.success("✅ Véhicule ajouté avec succès !"); st.balloons()
+            st.session_state['success_add_vehicle'] = False
 
         with st.form("a"):
-            n=st.text_input("Nom (ex: Ma voiture)"); c1,c2=st.columns(2); ma=c1.text_input("Marque"); mo=c2.text_input("Modèle")
+            n=st.text_input("Nom"); c1,c2=st.columns(2); ma=c1.text_input("Marque"); mo=c2.text_input("Modèle")
             im=st.text_input("Immat"); km=st.number_input("KM",0); an=st.number_input("Année",2000)
             if st.form_submit_button("Ajouter", type="primary"):
                 if dm.add_vehicle({"Nom":n,"Marque":ma,"Modele":mo,"Immatriculation":im,"Annee":an,"KM_Actuel":km}):
-                    st.session_state['success_add_vehicle'] = True
-                    st.rerun()
-                else:
-                    st.error("Erreur lors de l'ajout.")
+                    st.session_state['success_add_vehicle'] = True; st.rerun()
+                else: st.error("Erreur")
     else:
         vl = dm.get_vehicle_list()
         if not vl: st.info("Vide.")
@@ -226,6 +252,4 @@ else:
                 with t3:
                     if st.button("Plan", disabled=(ai is None)):
                         r = ai.check_maintenance_schedule(inf, dm.get_full_history_text(vid))
-                        if "error" not in r:
-                            st.markdown(r['response'])
-                            dm.save_echeance(vid, r['response'])
+                        if "error" not in r: st.markdown(r['response']); dm.save_echeance(vid, r['response'])
