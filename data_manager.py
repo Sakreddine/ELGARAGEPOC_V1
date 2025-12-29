@@ -71,8 +71,7 @@ class DataManager:
         except Exception as e: return False, str(e)
 
     def toggle_user_ai(self, uid, status):
-        if self.db_ready:
-            self.supabase.table('users').update({'ai_allowed': status}).eq('id', uid).execute()
+        if self.db_ready: self.supabase.table('users').update({'ai_allowed': status}).eq('id', uid).execute()
 
     def get_all_users(self):
         if not self.db_ready: return pd.DataFrame()
@@ -107,6 +106,7 @@ class DataManager:
             q = self.supabase.table('vehicules').select("*").eq('id', v_id)
             if self.current_user.get('role') != 'admin': q = q.eq('user_id', self.current_user['id'])
             res = q.execute()
+            # RETOURNE TOUT LE DICTIONNAIRE (Exhaustif)
             return res.data[0] if res.data else None
         except: return None
 
@@ -115,35 +115,24 @@ class DataManager:
         try:
             row = {
                 'user_id': self.current_user['id'], 
-                'nom': info.get('Nom'), 
-                'marque': info.get('Marque'), 
-                'modele': info.get('Modele'), 
-                'immatriculation': info.get('Immatriculation'), 
-                'annee': info.get('Annee'), 
-                'km_actuel': info.get('KM_Actuel')
+                'nom': info.get('Nom'), 'marque': info.get('Marque'), 'modele': info.get('Modele'), 
+                'immatriculation': info.get('Immatriculation'), 'annee': info.get('Annee'), 'km_actuel': info.get('KM_Actuel')
             }
             self.supabase.table('vehicules').insert(row).execute()
             self.log_action(self.current_user['id'], "ADD_VEHICLE", f"Ajout {info.get('Marque')}")
             return True
-        except Exception as e: 
-            st.error(str(e))
-            return False
+        except Exception as e: st.error(str(e)); return False
 
     def admin_update_vehicle(self, v_id, updates):
         if not self.db_ready: return
         try:
-            # Liste des champs interdits à la modification technique
             forbidden = ['marque', 'modele', 'immatriculation', 'annee', 'id', 'user_id']
-            # On nettoie le dictionnaire pour ne garder que ce qui est autorisé
             safe_updates = {k: v for k, v in updates.items() if k not in forbidden}
-            
             self.supabase.table('vehicules').update(safe_updates).eq('id', v_id).execute()
-            self.log_action(self.current_user['id'], "ADMIN_VEHICLE_EDIT", f"Update véhicule {v_id}")
             return True
-        except Exception as e:
-            st.error(str(e)); return False
+        except Exception as e: st.error(str(e)); return False
 
-    # --- LOGS & DIAGS ---
+    # --- LOGS & STATS ---
     def get_app_stats(self):
         if not self.db_ready: return {}
         try:
@@ -160,6 +149,7 @@ class DataManager:
             try: self.supabase.table('system_logs').insert({'user_id': uid, 'action_type': action, 'details': details}).execute()
             except: pass
 
+    # --- HISTORIQUE & DIAGS ---
     def get_notes_list(self, v_id):
         if not self.get_vehicle_info(v_id): return []
         try:
@@ -194,9 +184,19 @@ class DataManager:
         except: pass
 
     def get_full_history_text(self, v_id):
-        txt = "--- HISTORIQUE ---\n"
-        for n in self.get_notes_list(v_id): txt += f"- {n['Date_Intervention']} : {n['Type']} - {n['Notes']}\n"
+        """Récupère tout l'historique (Notes + Diags passés) pour donner du contexte à l'IA"""
+        txt = "--- HISTORIQUE DES INTERVENTIONS ---\n"
+        notes = self.get_notes_list(v_id)
+        if not notes: txt += "Aucune intervention notée.\n"
+        for n in notes: txt += f"- {n['Date_Intervention']} : [{n['Type']}] {n['Notes']}\n"
+        
+        txt += "\n--- HISTORIQUE DES DIAGNOSTICS IA ---\n"
+        diags = self.get_diagnostic_history(v_id)
+        if not diags: txt += "Aucun diagnostic précédent.\n"
+        for d in diags: txt += f"- {d['Date_Detection']} : Code {d['Code_Defaut']} -> {d['Resume_IA']}\n"
+        
         return txt
+
 
 
 
