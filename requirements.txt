@@ -30,6 +30,7 @@ python-dotenv
 # for the app
 streamlit
 pandas
+supabase
 groq
 supabase
 openpyxl
