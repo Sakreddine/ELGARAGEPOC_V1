@@ -12,11 +12,9 @@ class DataManager:
         self.current_user = None
 
     def connect_system_db(self, url, key):
-        """Connecte l'application à la base Supabase"""
         try:
             if not url or not key: return False
             self.supabase = create_client(url, key)
-            # Ping simple
             self.supabase.table('users').select("count", count='exact').execute()
             self.db_ready = True
             return True
@@ -30,8 +28,8 @@ class DataManager:
 
     # --- AUTHENTIFICATION ---
 
-    def register_user(self, nom, email, password):
-        # L'utilisateur s'inscrit toujours avec le rôle 'user' par défaut
+    def register_user(self, nom, email, password, adresse):
+        # Inscription réservée aux UTILISATEURS (Role = user)
         if not self.db_ready: return False, "Erreur DB"
         try:
             # Vérif doublon
@@ -42,7 +40,8 @@ class DataManager:
                 'nom': nom,
                 'email': email,
                 'password_hash': self._hash_password(password),
-                'role': 'user' # Force le rôle User pour toute inscription publique
+                'adresse': adresse, # Nouvelle colonne
+                'role': 'user'      # Toujours user via le formulaire
             }
             data = self.supabase.table('users').insert(new_user).execute()
             if data.data:
@@ -56,28 +55,27 @@ class DataManager:
         if not self.db_ready: return False, "Serveur non connecté"
         try:
             pwd_hash = self._hash_password(password)
+            # On récupère l'user
             response = self.supabase.table('users').select("*").eq('email', email).eq('password_hash', pwd_hash).execute()
             
             if response.data:
                 self.current_user = response.data[0]
-                self.log_action(self.current_user['id'], "LOGIN", "Connexion utilisateur")
+                self.log_action(self.current_user['id'], "LOGIN", "Connexion réussie")
                 return True, "Connexion réussie."
             else:
                 return False, "Email ou mot de passe incorrect."
         except Exception as e: return False, str(e)
 
-    # --- FONCTIONS ADMIN (NOUVEAU) ---
+    # --- ADMIN FUNCTIONS ---
 
     def get_all_users(self):
-        # Récupère tous les utilisateurs pour l'Admin
         if not self.db_ready: return pd.DataFrame()
         try:
-            response = self.supabase.table('users').select("id, nom, email, role, created_at").order('created_at', desc=True).execute()
+            response = self.supabase.table('users').select("id, nom, email, role, adresse, created_at").order('created_at', desc=True).execute()
             return pd.DataFrame(response.data)
         except: return pd.DataFrame()
 
     def get_app_stats(self):
-        # Récupère les compteurs pour le dashboard Admin
         if not self.db_ready: return {}
         try:
             u_count = self.supabase.table('users').select("count", count='exact').execute().count
@@ -87,7 +85,6 @@ class DataManager:
         except: return {}
     
     def get_all_vehicles_admin(self):
-        # Vue globale sur tout le parc automobile
         if not self.db_ready: return pd.DataFrame()
         try:
             response = self.supabase.table('vehicules').select("*").execute()
@@ -95,7 +92,6 @@ class DataManager:
         except: return pd.DataFrame()
 
     def log_action(self, user_id, action, details):
-        # Enregistre un événement dans la table logs
         if not self.db_ready: return
         try:
             self.supabase.table('system_logs').insert({
@@ -105,7 +101,7 @@ class DataManager:
             }).execute()
         except: pass
 
-    # --- VEHICULES (Logique Filtrée par Rôle) ---
+    # --- VEHICULES (User vs Admin) ---
 
     def get_vehicle_list(self):
         if not self.db_ready or not self.current_user: return []
@@ -119,7 +115,6 @@ class DataManager:
             
             df = pd.DataFrame(response.data)
             if df.empty: return []
-            # On formate l'affichage pour la liste déroulante
             return [(r['id'], f"{r.get('marque')} {r.get('modele')} - {r.get('immatriculation')}") for _, r in df.iterrows()]
         except: return []
 
@@ -127,8 +122,6 @@ class DataManager:
         if not self.db_ready: return None
         try:
             query = self.supabase.table('vehicules').select("*").eq('id', v_id)
-            
-            # Sécurité : Si pas admin, on vérifie que le véhicule appartient bien au user
             if self.current_user.get('role') != 'admin':
                 query = query.eq('user_id', self.current_user['id'])
             
@@ -151,9 +144,9 @@ class DataManager:
             self.log_action(self.current_user['id'], "ADD_VEHICLE", f"Ajout {info.get('Marque')}")
         except Exception as e: st.error(f"Erreur Ajout: {e}")
 
-    # --- HISTORIQUE & DIAGS (User Standard) ---
+    # --- HISTORIQUE & DIAGS ---
     def get_notes_list(self, v_id):
-        if not self.get_vehicle_info(v_id): return [] # Vérifie les droits d'abord
+        if not self.get_vehicle_info(v_id): return []
         try:
             response = self.supabase.table('historique_vehicules').select("*").eq('vehicule_id', v_id).order('date', desc=True).execute()
             mapped = []
