@@ -19,9 +19,7 @@ IS_MAINTENANCE = settings['maintenance_mode'] if settings else True
 ACTIVE_KEY = settings['groq_api_key'] if settings else None
 if 'success_add_vehicle' not in st.session_state: st.session_state['success_add_vehicle'] = False
 
-# ==============================================================================
-#  LOGIN
-# ==============================================================================
+# LOGIN
 if 'user_logged_in' not in st.session_state: st.session_state['user_logged_in'] = False
 
 if not st.session_state['user_logged_in']:
@@ -64,9 +62,7 @@ if not st.session_state['user_logged_in']:
             else: st.error("Erreur")
     st.stop()
 
-# ==============================================================================
-#  APP
-# ==============================================================================
+# APP
 user = st.session_state['dm'].current_user
 role = user.get('role', 'user')
 ai_allowed = user.get('ai_allowed', False)
@@ -86,7 +82,7 @@ with c2:
         st.session_state['user_logged_in'] = False
         st.rerun()
 
-# --- ADMIN ---
+# ADMIN
 if role == 'admin':
     st.divider()
     t1, t2, t3, t4 = st.tabs(["⚙️ Config", "👥 Users", "🚗 Flotte Complète", "📊 Stats"])
@@ -119,14 +115,10 @@ if role == 'admin':
     with t3:
         st.subheader("Flotte Complète")
         vl = dm.get_vehicle_list()
-        
-        # TABLEAU
         full_data = dm.get_all_vehicles_admin()
         if not full_data.empty: st.dataframe(full_data, use_container_width=True)
-
         st.divider()
 
-        # EDITION COMPLETE
         if vl:
             st.subheader("✏️ Éditer les Détails Techniques")
             sel = st.selectbox("Sélectionner véhicule", vl, format_func=lambda x: x[1])
@@ -135,52 +127,36 @@ if role == 'admin':
             
             if v:
                 st.info(f"Édition : {v.get('marque')} {v.get('modele')} ({v.get('immatriculation')})")
-                
                 with st.form("edit_v_full"):
-                    # GENERAL
-                    with st.expander("📝 Général & Identification", expanded=True):
+                    with st.expander("📝 Général", expanded=True):
                         c1, c2, c3 = st.columns(3)
                         vin = c1.text_input("VIN", value=v.get('vin') or "")
                         km = c2.number_input("KM Actuel", value=v.get('km_actuel', 0))
                         coul = c3.text_input("Couleur", value=v.get('couleur') or "")
-                        
-                        c1, c2, c3 = st.columns(3)
                         carr = c1.text_input("Carrosserie", value=v.get('carrosserie') or "")
-                        genr = c2.text_input("Genre (VP/CTTE)", value=v.get('genre_v') or "")
-                        dt_circ = c3.date_input("Date Circulation", value=None) # Simplification date
-
-                    # MOTEUR
-                    with st.expander("⚙️ Moteur & Performance"):
+                        genr = c2.text_input("Genre", value=v.get('genre_v') or "")
+                    
+                    with st.expander("⚙️ Moteur"):
                         c1, c2, c3 = st.columns(3)
                         p_ch = c1.number_input("Puissance (ch)", value=v.get('puissance_ch', 0))
-                        p_fi = c2.number_input("Puissance Fisc (CV)", value=v.get('puissance_fiscale', 0))
-                        cyl = c3.number_input("Cylindrée (cc)", value=v.get('cylindree', 0))
-                        
-                        c1, c2, c3 = st.columns(3)
+                        p_fi = c2.number_input("Puissance Fisc", value=v.get('puissance_fiscale', 0))
+                        cyl = c3.number_input("Cylindrée", value=v.get('cylindree', 0))
                         mot_c = c1.text_input("Code Moteur", value=v.get('code_moteur') or "")
                         soup = c2.number_input("Soupapes", value=v.get('soupapes', 0))
-                        co2 = c3.number_input("CO2 (g/km)", value=v.get('co2', 0))
-                        
-                        c1, c2 = st.columns(2)
+                        co2 = c3.number_input("CO2", value=v.get('co2', 0))
                         carb = c1.text_input("Carburant", value=v.get('carburant') or "")
                         turbo = c2.checkbox("Turbo", value=v.get('turbo', False))
 
-                    # TRANSMISSION
-                    with st.expander("🕹️ Transmission"):
+                    with st.expander("🕹️ Transmission & Autres"):
                         c1, c2, c3 = st.columns(3)
                         bv = c1.text_input("Boite Vitesse", value=v.get('boite_vitesse') or "")
                         nb_v = c2.number_input("Nb Rapports", value=v.get('nb_vitesses', 0))
                         roue = c3.text_input("Roues Motrices", value=v.get('roues_motrices') or "")
-
-                    # DIMENSIONS & FLUIDES
-                    with st.expander("📏 Dimensions & Entretien"):
-                        c1, c2, c3 = st.columns(3)
                         pds = c1.number_input("Poids (kg)", value=v.get('poids_kg', 0))
                         hui = c2.text_input("Viscosité Huile", value=v.get('viscosite_huile') or "")
                         vol_h = c3.number_input("Capacité Huile (L)", value=float(v.get('capacite_huile_l') or 0.0))
 
-                    if st.form_submit_button("Enregistrer Toutes les Modifications"):
-                        # Construction du dictionnaire update
+                    if st.form_submit_button("Sauvegarder"):
                         updates = {
                             'vin': vin, 'km_actuel': km, 'couleur': coul, 'carrosserie': carr, 'genre_v': genr,
                             'puissance_ch': p_ch, 'puissance_fiscale': p_fi, 'cylindree': cyl, 'code_moteur': mot_c,
@@ -191,10 +167,9 @@ if role == 'admin':
                         if dm.admin_update_vehicle(vid, updates):
                             st.success("Mise à jour effectuée !"); st.rerun()
 
-    with t4:
-        st.json(dm.get_app_stats())
+    with t4: st.json(dm.get_app_stats())
 
-# --- USER ---
+# USER
 else:
     nav = st.radio("Menu", ["Mes Véhicules", "Ajouter"], horizontal=True)
 
@@ -237,7 +212,6 @@ else:
                                 else:
                                     st.markdown(r['resume_court'])
                                     dm.save_diagnostic(vid, c, str(r), r.get('estimation_cout_pieces_mo'), r.get('sante_vehicule'), d, r.get('resume_court'))
-                    
                     dh = dm.get_diagnostic_history(vid)
                     if dh: st.dataframe(pd.DataFrame(dh)[['Date_Detection','Code_Defaut','Resume_IA']], hide_index=True)
 
