@@ -12,11 +12,11 @@ class DataManager:
         self.current_user = None
 
     def connect_system_db(self, url, key):
-        """Tente de connecter la base de données"""
+        """Connecte l'application à la base Supabase"""
         try:
             if not url or not key: return False
             self.supabase = create_client(url, key)
-            # Test de connexion (ping)
+            # Ping simple
             self.supabase.table('users').select("count", count='exact').execute()
             self.db_ready = True
             return True
@@ -30,11 +30,11 @@ class DataManager:
 
     # --- AUTHENTIFICATION ---
 
-    def register_user(self, nom, email, password, groq_key):
-        # On suppose que la DB est connectée juste avant l'appel
-        if not self.db_ready: return False, "Erreur : Base de données non connectée."
+    def register_user(self, nom, email, password):
+        # L'utilisateur s'inscrit toujours avec le rôle 'user' par défaut
+        if not self.db_ready: return False, "Erreur DB"
         try:
-            # Vérif existence
+            # Vérif doublon
             res = self.supabase.table('users').select("*").eq('email', email).execute()
             if res.data: return False, "Cet email existe déjà."
 
@@ -42,39 +42,76 @@ class DataManager:
                 'nom': nom,
                 'email': email,
                 'password_hash': self._hash_password(password),
-                'groq_key': groq_key
+                'role': 'user' # Force le rôle User pour toute inscription publique
             }
             data = self.supabase.table('users').insert(new_user).execute()
             if data.data:
                 self.current_user = data.data[0]
-                return True, f"Compte créé ! (ID: {self.current_user['id']})"
-            return False, "Erreur lors de la création."
+                self.log_action(self.current_user['id'], "REGISTER", "Nouvelle inscription")
+                return True, "Compte créé avec succès."
+            return False, "Erreur création."
         except Exception as e: return False, str(e)
 
     def login_user(self, email, password):
-        if not self.db_ready: return False, "Le serveur n'est pas initialisé (Faites une inscription pour le réveiller ou configurez les secrets)."
+        if not self.db_ready: return False, "Serveur non connecté"
         try:
             pwd_hash = self._hash_password(password)
             response = self.supabase.table('users').select("*").eq('email', email).eq('password_hash', pwd_hash).execute()
             
             if response.data:
                 self.current_user = response.data[0]
-                return True, f"Connexion réussie."
+                self.log_action(self.current_user['id'], "LOGIN", "Connexion utilisateur")
+                return True, "Connexion réussie."
             else:
                 return False, "Email ou mot de passe incorrect."
         except Exception as e: return False, str(e)
 
-    def get_user_api_keys(self):
-        if self.current_user:
-            return {'groq': self.current_user.get('groq_key')}
-        return None
+    # --- FONCTIONS ADMIN (NOUVEAU) ---
 
-    # --- VEHICULES (ADMIN MODE) ---
+    def get_all_users(self):
+        # Récupère tous les utilisateurs pour l'Admin
+        if not self.db_ready: return pd.DataFrame()
+        try:
+            response = self.supabase.table('users').select("id, nom, email, role, created_at").order('created_at', desc=True).execute()
+            return pd.DataFrame(response.data)
+        except: return pd.DataFrame()
+
+    def get_app_stats(self):
+        # Récupère les compteurs pour le dashboard Admin
+        if not self.db_ready: return {}
+        try:
+            u_count = self.supabase.table('users').select("count", count='exact').execute().count
+            v_count = self.supabase.table('vehicules').select("count", count='exact').execute().count
+            l_count = self.supabase.table('system_logs').select("count", count='exact').execute().count
+            return {"users": u_count, "vehicles": v_count, "logs": l_count}
+        except: return {}
+    
+    def get_all_vehicles_admin(self):
+        # Vue globale sur tout le parc automobile
+        if not self.db_ready: return pd.DataFrame()
+        try:
+            response = self.supabase.table('vehicules').select("*").execute()
+            return pd.DataFrame(response.data)
+        except: return pd.DataFrame()
+
+    def log_action(self, user_id, action, details):
+        # Enregistre un événement dans la table logs
+        if not self.db_ready: return
+        try:
+            self.supabase.table('system_logs').insert({
+                "user_id": user_id,
+                "action_type": action,
+                "details": details
+            }).execute()
+        except: pass
+
+    # --- VEHICULES (Logique Filtrée par Rôle) ---
+
     def get_vehicle_list(self):
         if not self.db_ready or not self.current_user: return []
         try:
-            # Si ID 1 (Admin) -> Voit tout. Sinon -> Voit ses véhicules.
-            if self.current_user['id'] == 1:
+            # Si Admin -> Voit tout. Si User -> Voit SES véhicules.
+            if self.current_user.get('role') == 'admin':
                 response = self.supabase.table('vehicules').select("*").execute()
             else:
                 uid = self.current_user['id']
@@ -82,6 +119,7 @@ class DataManager:
             
             df = pd.DataFrame(response.data)
             if df.empty: return []
+            # On formate l'affichage pour la liste déroulante
             return [(r['id'], f"{r.get('marque')} {r.get('modele')} - {r.get('immatriculation')}") for _, r in df.iterrows()]
         except: return []
 
@@ -89,7 +127,9 @@ class DataManager:
         if not self.db_ready: return None
         try:
             query = self.supabase.table('vehicules').select("*").eq('id', v_id)
-            if self.current_user['id'] != 1: # Restriction si pas admin
+            
+            # Sécurité : Si pas admin, on vérifie que le véhicule appartient bien au user
+            if self.current_user.get('role') != 'admin':
                 query = query.eq('user_id', self.current_user['id'])
             
             response = query.execute()
@@ -108,11 +148,12 @@ class DataManager:
                 'immatriculation': info.get('Immatriculation'), 'annee': info.get('Annee'), 'km_actuel': info.get('KM_Actuel')
             }
             self.supabase.table('vehicules').insert(db_row).execute()
+            self.log_action(self.current_user['id'], "ADD_VEHICLE", f"Ajout {info.get('Marque')}")
         except Exception as e: st.error(f"Erreur Ajout: {e}")
 
-    # --- HISTORIQUE & DIAGS ---
+    # --- HISTORIQUE & DIAGS (User Standard) ---
     def get_notes_list(self, v_id):
-        if not self.get_vehicle_info(v_id): return []
+        if not self.get_vehicle_info(v_id): return [] # Vérifie les droits d'abord
         try:
             response = self.supabase.table('historique_vehicules').select("*").eq('vehicule_id', v_id).order('date', desc=True).execute()
             mapped = []
@@ -127,6 +168,7 @@ class DataManager:
             v_info = self.get_vehicle_info(v_id)
             km = v_info.get('KM_Actuel', 0)
             self.supabase.table('historique_vehicules').insert({'vehicule_id': v_id, 'date': date_interv.strftime("%Y-%m-%d"), 'type_evenement': type_n, 'notes': text_n, 'kilometrage': km}).execute()
+            self.log_action(self.current_user['id'], "ADD_NOTE", f"Note sur vehicule {v_id}")
         except Exception as e: st.error(f"Erreur: {e}")
 
     def get_diagnostic_history(self, v_id):
@@ -143,6 +185,7 @@ class DataManager:
         if not self.get_vehicle_info(v_id): return
         try:
             self.supabase.table('diagnostics_vehicules').insert({'vehicule_id': v_id, 'date': date_detect.strftime("%Y-%m-%d"), 'code_defaut': codes, 'resume_ia': resume, 'analyse_ia': analyse, 'cout_estime': cout, 'sante_vehicule': sante}).execute()
+            self.log_action(self.current_user['id'], "ADD_DIAG", f"Diag sur vehicule {v_id}")
         except Exception as e: st.error(f"Erreur: {e}")
 
     def save_echeance(self, v_id, analyse):
