@@ -10,8 +10,8 @@ import pandas as pd
 # Ces clés permettent à l'application de fonctionner pour TOUS les utilisateurs.
 # L'utilisateur final n'a PAS besoin de fournir ses propres clés.
 ADMIN_SB_URL = "https://ljdzsqpzbxtrptdaftur.supabase.co" # Votre URL Supabase
-ADMIN_SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."  # Votre Clé Supabase (Anon)
-ADMIN_GROQ_KEY = "gsk_..."                                # Votre Clé API Groq
+ADMIN_SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxqZHpzcXB6Ynh0cnB0ZGFmdHVyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY3NjA3NTIsImV4cCI6MjA4MjMzNjc1Mn0.Z0IaWz901FG360CrGMHAQBdDJ88md2p2mpCe-Y5yOVY"  # Votre Clé Supabase (Anon)
+ADMIN_GROQ_KEY = "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"                                # Votre Clé API Groq
 
 st.set_page_config(page_title="ELGarage SaaS", layout="wide", initial_sidebar_state="collapsed")
 st.markdown("""<style>.stButton>button { height: 3em; width: 100%; border-radius: 10px; font-weight: bold; } .report-container { background-color: #f8f9fa; border: 2px solid #f25c05; border-radius: 10px; padding: 15px; margin-bottom: 20px; } #MainMenu {visibility: hidden;} footer {visibility: hidden;} .block-container { padding-top: 2rem; }</style>""", unsafe_allow_html=True)
@@ -236,3 +236,4 @@ else:
                                     st.markdown(r['response'])
                                     dm.save_echeance(v_id, r['response'])
                                     st.balloons()
+
