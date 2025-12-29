@@ -24,7 +24,7 @@ class DataManager:
     def _hash_password(self, password):
         return hashlib.sha256(password.encode()).hexdigest()
 
-    # --- CONFIGURATION & IA ---
+    # --- CONFIG ---
     def get_app_settings(self):
         if not self.db_ready: return None
         try:
@@ -44,42 +44,7 @@ class DataManager:
     def toggle_maintenance(self, status):
         if self.db_ready: self.supabase.table('app_settings').update({'maintenance_mode': status}).eq('id', 1).execute()
 
-    # --- GESTION UTILISATEURS (ADMIN) ---
-    def toggle_user_ai(self, target_user_id, new_status):
-        """Active ou Désactive l'IA pour un utilisateur spécifique"""
-        if not self.db_ready: return
-        try:
-            self.supabase.table('users').update({'ai_allowed': new_status}).eq('id', target_user_id).execute()
-            self.log_action(self.current_user['id'], "USER_EDIT", f"IA status changé pour user {target_user_id} -> {new_status}")
-        except Exception as e: st.error(str(e))
-
-    def get_all_users(self):
-        if not self.db_ready: return pd.DataFrame()
-        try:
-            res = self.supabase.table('users').select("*").order('created_at', desc=True).execute()
-            return pd.DataFrame(res.data)
-        except: return pd.DataFrame()
-
-    # --- GESTION VÉHICULES (ADMIN UPDATE) ---
-    def admin_update_vehicle(self, v_id, updates):
-        """
-        Met à jour les infos véhicule sauf les champs interdits.
-        Les champs interdits (Marque, Modele, etc.) ne doivent pas être dans 'updates'.
-        """
-        if not self.db_ready: return
-        try:
-            # Sécurité supplémentaire : on retire les clés interdites si elles sont passées par erreur
-            forbidden = ['marque', 'modele', 'immatriculation', 'annee', 'id', 'user_id']
-            safe_updates = {k: v for k, v in updates.items() if k not in forbidden}
-            
-            self.supabase.table('vehicules').update(safe_updates).eq('id', v_id).execute()
-            self.log_action(self.current_user['id'], "ADMIN_VEHICLE_EDIT", f"Update véhicule {v_id}")
-            return True
-        except Exception as e: 
-            st.error(str(e))
-            return False
-
-    # --- AUTH ---
+    # --- USERS ---
     def register_user(self, nom, email, password, adresse):
         if not self.db_ready: return False, "Erreur DB"
         try:
@@ -105,18 +70,18 @@ class DataManager:
             return False, "Identifiants incorrects"
         except Exception as e: return False, str(e)
 
-    # --- DATA GETTERS & LOGS ---
-    def get_app_stats(self):
-        if not self.db_ready: return {}
-        try:
-            u = self.supabase.table('users').select("count", count='exact').execute().count
-            v = self.supabase.table('vehicules').select("count", count='exact').execute().count
-            l = self.supabase.table('system_logs').select("count", count='exact').execute().count
-            stt = self.get_app_settings()
-            status = "🔴 Maintenance" if stt and stt['maintenance_mode'] else "🟢 Actif"
-            return {"users": u, "vehicles": v, "logs": l, "status": status}
-        except: return {}
+    def toggle_user_ai(self, uid, status):
+        if self.db_ready:
+            self.supabase.table('users').update({'ai_allowed': status}).eq('id', uid).execute()
 
+    def get_all_users(self):
+        if not self.db_ready: return pd.DataFrame()
+        try:
+            res = self.supabase.table('users').select("*").order('created_at', desc=True).execute()
+            return pd.DataFrame(res.data)
+        except: return pd.DataFrame()
+
+    # --- VEHICULES ---
     def get_vehicle_list(self):
         if not self.db_ready or not self.current_user: return []
         try:
@@ -130,8 +95,10 @@ class DataManager:
         except: return []
 
     def get_all_vehicles_admin(self):
+        """Récupère la totalité des colonnes pour l'Admin"""
         if not self.db_ready: return pd.DataFrame()
         try:
+            # select("*") récupère bien toutes les colonnes définies dans le SQL
             res = self.supabase.table('vehicules').select("*").execute()
             return pd.DataFrame(res.data)
         except: return pd.DataFrame()
@@ -142,26 +109,57 @@ class DataManager:
             q = self.supabase.table('vehicules').select("*").eq('id', v_id)
             if self.current_user.get('role') != 'admin': q = q.eq('user_id', self.current_user['id'])
             res = q.execute()
-            if res.data:
-                r = res.data[0]
-                # On retourne toutes les infos utiles pour l'édition admin
-                return r # Retourne le dict complet
-            return None
+            return res.data[0] if res.data else None
         except: return None
 
     def add_vehicle(self, info):
+        if not self.db_ready: return False
+        try:
+            # On insère les infos de base disponibles dans le formulaire client
+            # Les autres champs resteront NULL (vides) jusqu'à ce que l'admin les complète
+            row = {
+                'user_id': self.current_user['id'], 
+                'nom': info.get('Nom'), 
+                'marque': info.get('Marque'), 
+                'modele': info.get('Modele'), 
+                'immatriculation': info.get('Immatriculation'), 
+                'annee': info.get('Annee'), 
+                'km_actuel': info.get('KM_Actuel')
+            }
+            self.supabase.table('vehicules').insert(row).execute()
+            self.log_action(self.current_user['id'], "ADD_VEHICLE", f"Ajout {info.get('Marque')}")
+            return True
+        except Exception as e: 
+            st.error(str(e))
+            return False
+
+    def admin_update_vehicle(self, v_id, updates):
         if not self.db_ready: return
         try:
-            row = {'user_id': self.current_user['id'], 'nom': info['Nom'], 'marque': info['Marque'], 'modele': info['Modele'], 'immatriculation': info['Immatriculation'], 'annee': info['Annee'], 'km_actuel': info['KM_Actuel']}
-            self.supabase.table('vehicules').insert(row).execute()
-        except Exception as e: st.error(str(e))
+            forbidden = ['marque', 'modele', 'immatriculation', 'annee', 'id', 'user_id']
+            safe_updates = {k: v for k, v in updates.items() if k not in forbidden}
+            self.supabase.table('vehicules').update(safe_updates).eq('id', v_id).execute()
+            return True
+        except Exception as e:
+            st.error(str(e)); return False
+
+    # --- LOGS & DIAGS ---
+    def get_app_stats(self):
+        if not self.db_ready: return {}
+        try:
+            u = self.supabase.table('users').select("count", count='exact').execute().count
+            v = self.supabase.table('vehicules').select("count", count='exact').execute().count
+            l = self.supabase.table('system_logs').select("count", count='exact').execute().count
+            stt = self.get_app_settings()
+            status = "🔴 Maintenance" if stt and stt['maintenance_mode'] else "🟢 Actif"
+            return {"users": u, "vehicles": v, "logs": l, "status": status}
+        except: return {}
 
     def log_action(self, uid, action, details):
         if self.db_ready:
             try: self.supabase.table('system_logs').insert({'user_id': uid, 'action_type': action, 'details': details}).execute()
             except: pass
 
-    # --- DIAG/HISTO ---
     def get_notes_list(self, v_id):
         if not self.get_vehicle_info(v_id): return []
         try:
@@ -199,6 +197,6 @@ class DataManager:
         txt = "--- HISTORIQUE ---\n"
         for n in self.get_notes_list(v_id): txt += f"- {n['Date_Intervention']} : {n['Type']} - {n['Notes']}\n"
         return txt
-        for n in self.get_notes_list(v_id): txt += f"- {n['Date_Intervention']} : {n['Type']} - {n['Notes']}\n"
         return txt
+
 
