@@ -7,46 +7,80 @@ import requests
 import time
 
 # --- CONFIGURATION INITIALE ---
-st.set_page_config(page_title="ELGarage SaaS", layout="wide", initial_sidebar_state="collapsed")
-st.markdown("""<style>.stButton>button { height: 3em; width: 100%; border-radius: 10px; font-weight: bold; } .report-container { background-color: #f8f9fa; border: 2px solid #f25c05; border-radius: 10px; padding: 15px; margin-bottom: 20px; } #MainMenu {visibility: hidden;} footer {visibility: hidden;} .block-container { padding-top: 2rem; }</style>""", unsafe_allow_html=True)
+st.set_page_config(page_title="ELGarage SaaS", layout="wide", initial_sidebar_state="expanded")
 
-# --- MONITORING SERVEUR (NOUVEAU) ---
+# CSS Personnalisé
+st.markdown("""
+<style>
+    .stButton>button { height: 3em; width: 100%; border-radius: 10px; font-weight: bold; } 
+    .report-container { background-color: #f8f9fa; border: 2px solid #f25c05; border-radius: 10px; padding: 15px; margin-bottom: 20px; } 
+    #MainMenu {visibility: hidden;} 
+    footer {visibility: hidden;} 
+    .block-container { padding-top: 2rem; }
+    /* Style pour le status serveur */
+    .status-box { padding: 10px; border-radius: 5px; margin-bottom: 10px; text-align: center; font-weight: bold; }
+    .status-online { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+    .status-offline { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+    .status-check { background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
+</style>
+""", unsafe_allow_html=True)
+
+# --- MONITORING SERVEUR (Admin UI) ---
 API_URL = "https://elgarage-api.onrender.com"  # Votre URL Render
 
 def afficher_etat_serveur():
-    """Vérifie l'état de l'API et l'affiche dans la sidebar"""
-    st.sidebar.header("📡 État du Système")
-    status_box = st.sidebar.empty()
+    """Affiche l'état du serveur Render dans la sidebar"""
+    st.sidebar.header("📡 État Serveur")
     
-    if st.sidebar.button("🔄 Vérifier connexion"):
+    # Bouton discret pour rafraichir
+    if st.sidebar.button("🔄 Check Ping", key="btn_ping"):
         st.rerun()
 
+    status_placeholder = st.sidebar.empty()
+    
     try:
-        start_time = time.time()
-        # Ping sur la racine de l'API
-        response = requests.get(f"{API_URL}/", timeout=5) 
-        duration = round((time.time() - start_time) * 1000)
+        start = time.time()
+        # Timeout court (3s) pour ne pas bloquer l'UI trop longtemps
+        response = requests.get(f"{API_URL}/", timeout=3)
+        latence = round((time.time() - start) * 1000)
 
         if response.status_code == 200:
-            status_box.success(f"🟢 **EN LIGNE** ({duration}ms)")
+            status_placeholder.markdown(f"""
+            <div class="status-box status-online">
+                🟢 ONLINE ({latence}ms)<br>
+                <small>API Opérationnelle</small>
+            </div>
+            """, unsafe_allow_html=True)
         else:
-            status_box.warning(f"🟠 **Code {response.status_code}**")
-            
-    except requests.exceptions.ConnectionError:
-        status_box.error("🔴 **HORS LIGNE**")
-        st.sidebar.info("Le serveur est peut-être éteint.")
+            status_placeholder.markdown(f"""
+            <div class="status-box status-check">
+                🟠 Code {response.status_code}
+            </div>
+            """, unsafe_allow_html=True)
+
     except requests.exceptions.Timeout:
-        status_box.warning("🟠 **LENT (Réveil...)**")
-        st.sidebar.caption("Le serveur sort de veille, réessayez dans 30s.")
+        status_placeholder.markdown("""
+        <div class="status-box status-check">
+            🟠 DÉMARRAGE...<br>
+            <small>Le serveur se réveille (Cold Start)</small>
+        </div>
+        """, unsafe_allow_html=True)
+    except requests.exceptions.ConnectionError:
+        status_placeholder.markdown("""
+        <div class="status-box status-offline">
+            🔴 HORS LIGNE<br>
+            <small>Serveur éteint ou inaccessible</small>
+        </div>
+        """, unsafe_allow_html=True)
     except Exception as e:
-        status_box.error("Erreur inconnue")
+        st.sidebar.error(f"Err: {e}")
 
-# Appel immédiat pour afficher dans la sidebar
-afficher_etat_serveur()
-
-# --- INITIALISATION DATA MANAGER ---
+# --- INITIALISATION ---
 if 'dm' not in st.session_state: st.session_state['dm'] = DataManager()
 dm = st.session_state['dm']
+
+# Affiche le monitoring tout de suite
+afficher_etat_serveur()
 
 if not dm.db_ready:
     st.error("🔴 Erreur Secrets : Configurez .streamlit/secrets.toml")
@@ -63,7 +97,7 @@ if 'user_logged_in' not in st.session_state: st.session_state['user_logged_in'] 
 if not st.session_state['user_logged_in']:
     c1, c2 = st.columns([1, 4])
     with c1: st.markdown("# 🚗")
-    with c2: st.title("ELGarage")
+    with c2: st.title("ELGarage Admin")
 
     if IS_MAINTENANCE: st.warning("🛠️ Système en Maintenance.")
 
@@ -77,11 +111,12 @@ if not st.session_state['user_logged_in']:
             if ok:
                 role = dm.current_user.get('role', 'user')
                 if is_admin and role != 'admin':
-                    st.error("Pas Admin")
+                    st.error("Accès refusé : Ce compte n'est pas Admin.")
                     dm.current_user = None
                 else:
                     st.session_state['user_logged_in'] = True
                     user_can_ai = dm.current_user.get('ai_allowed', False)
+                    # Init IA si possible
                     if role == 'admin' and ACTIVE_KEY:
                           st.session_state['ai'] = AIEngine(api_key=ACTIVE_KEY)
                     elif not IS_MAINTENANCE and ACTIVE_KEY and user_can_ai:
@@ -93,11 +128,12 @@ if not st.session_state['user_logged_in']:
         c1,c2=st.columns(2)
         n=c1.text_input("Nom"); m=c2.text_input("Email")
         p=st.text_input("Pass", type="password"); a=st.text_input("Adresse")
-        if st.button("Créer"):
-            if dm.register_user(n, m, p, a)[0]:
+        if st.button("Créer Compte"):
+            ok, msg = dm.register_user(n, m, p, a)
+            if ok:
                 st.session_state['user_logged_in'] = True
-                st.success("OK"); st.rerun()
-            else: st.error("Erreur")
+                st.success("Compte créé !"); st.rerun()
+            else: st.error(f"Erreur: {msg}")
     st.stop()
 
 # --- APP PRINCIPALE ---
@@ -126,46 +162,68 @@ if role == 'admin':
     t1, t2, t3, t4 = st.tabs(["⚙️ Config", "👥 Users", "🚗 Flotte Complète", "📊 Stats"])
     
     with t1:
-        st.subheader("Global Settings")
+        st.subheader("Configuration Système")
+        
+        # Gestion Activation IA
         if IS_MAINTENANCE:
-            k = st.text_input("Groq Key", type="password")
-            if st.button("Activer"):
-                if dm.update_ai_configuration(k)[0]: st.rerun()
+            st.info("Le système est en maintenance. L'IA est désactivée pour les clients.")
+            k = st.text_input("Clé API Groq (gsk_...)", type="password", value=ACTIVE_KEY if ACTIVE_KEY else "")
+            
+            if st.button("ACTIVER L'IA & LE SYSTÈME", type="primary"):
+                if not k:
+                    st.error("Veuillez entrer une clé.")
+                else:
+                    with st.spinner("Test de la connexion à Groq en cours..."):
+                        # C'est ici que ça bloquait : on ajoute un spinner visuel
+                        ok, msg = dm.update_ai_configuration(k)
+                        if ok:
+                            st.success(f"Succès : {msg}")
+                            time.sleep(1) # Petit temps pour lire
+                            st.rerun()
+                        else:
+                            st.error(f"Échec connexion IA : {msg}")
         else:
-            if st.button("Passer en Maintenance"):
+            st.success("Le système est ACTIF et l'IA est fonctionnelle.")
+            if st.button("Passer en Maintenance (Désactiver IA)"):
                 dm.toggle_maintenance(True); st.rerun()
 
     with t2:
-        st.subheader("Droits IA")
+        st.subheader("Gestion Utilisateurs")
         df_u = dm.get_all_users()
         if not df_u.empty:
+            # Correction WARNING Streamlit: width='stretch'
+            st.dataframe(df_u[['id','nom','email','role','ai_allowed','created_at']], width='stretch', hide_index=True)
+            
+            st.write("---")
+            st.write("Modifier Droits IA :")
             for i, row in df_u.iterrows():
-                c1, c2, c3, c4 = st.columns([1, 2, 2, 1])
-                c1.write(f"ID: {row['id']}")
-                c2.write(f"**{row['nom']}**")
-                c3.write(row['email'])
+                c1, c2, c3 = st.columns([2, 2, 1])
+                c1.write(f"**{row['nom']}** ({row['email']})")
                 is_on = row['ai_allowed']
-                if c4.toggle("IA", value=is_on, key=f"tg_{row['id']}"):
+                if c3.toggle("Accès IA", value=is_on, key=f"tg_{row['id']}"):
                     if not is_on: dm.toggle_user_ai(row['id'], True)
                 else:
                     if is_on: dm.toggle_user_ai(row['id'], False)
 
     with t3:
         st.subheader("Flotte Complète")
-        vl = dm.get_vehicle_list()
         full_data = dm.get_all_vehicles_admin()
-        if not full_data.empty: st.dataframe(full_data, use_container_width=True)
+        if not full_data.empty: 
+            # Correction WARNING Streamlit: width='stretch'
+            st.dataframe(full_data, width='stretch')
+        
         st.divider()
+        vl = dm.get_vehicle_list() # Liste simplifiée pour le selectbox
 
         if vl:
-            st.subheader("✏️ Éditer les Détails Techniques")
-            sel = st.selectbox("Sélectionner véhicule", vl, format_func=lambda x: x[1])
+            st.subheader("✏️ Éditer Véhicule")
+            sel = st.selectbox("Sélectionner véhicule à modifier", vl, format_func=lambda x: x[1])
             vid = sel[0]
             v = dm.get_vehicle_info(vid)
             
             if v:
-                st.info(f"Édition : {v.get('marque')} {v.get('modele')} ({v.get('immatriculation')})")
                 with st.form("edit_v_full"):
+                    st.caption(f"Modification de {v.get('marque')} {v.get('modele')}")
                     with st.expander("📝 Général", expanded=True):
                         c1, c2, c3 = st.columns(3)
                         vin = c1.text_input("VIN", value=v.get('vin') or "")
@@ -185,83 +243,102 @@ if role == 'admin':
                         carb = c1.text_input("Carburant", value=v.get('carburant') or "")
                         turbo = c2.checkbox("Turbo", value=v.get('turbo', False))
 
-                    with st.expander("🕹️ Transmission & Autres"):
-                        c1, c2, c3 = st.columns(3)
-                        bv = c1.text_input("Boite Vitesse", value=v.get('boite_vitesse') or "")
-                        nb_v = c2.number_input("Nb Rapports", value=v.get('nb_vitesses', 0))
-                        roue = c3.text_input("Roues Motrices", value=v.get('roues_motrices') or "")
-                        pds = c1.number_input("Poids (kg)", value=v.get('poids_kg', 0))
-                        hui = c2.text_input("Viscosité Huile", value=v.get('viscosite_huile') or "")
-                        vol_h = c3.number_input("Capacité Huile (L)", value=float(v.get('capacite_huile_l') or 0.0))
-
-                    if st.form_submit_button("Sauvegarder"):
+                    if st.form_submit_button("Sauvegarder les modifications"):
                         updates = {
                             'vin': vin, 'km_actuel': km, 'couleur': coul, 'carrosserie': carr, 'genre_v': genr,
                             'puissance_ch': p_ch, 'puissance_fiscale': p_fi, 'cylindree': cyl, 'code_moteur': mot_c,
-                            'soupapes': soup, 'co2': co2, 'carburant': carb, 'turbo': turbo,
-                            'boite_vitesse': bv, 'nb_vitesses': nb_v, 'roues_motrices': roue,
-                            'poids_kg': pds, 'viscosite_huile': hui, 'capacite_huile_l': vol_h
+                            'soupapes': soup, 'co2': co2, 'carburant': carb, 'turbo': turbo
                         }
                         if dm.admin_update_vehicle(vid, updates):
                             st.success("Mise à jour effectuée !"); st.rerun()
 
-    with t4: st.json(dm.get_app_stats())
+    with t4: 
+        st.subheader("Statistiques")
+        st.json(dm.get_app_stats())
 
-# --- INTERFACE USER ---
+# --- INTERFACE USER (Client) ---
 else:
-    nav = st.radio("Menu", ["Mes Véhicules", "Ajouter"], horizontal=True)
+    nav = st.radio("Menu", ["Mes Véhicules", "Ajouter un véhicule"], horizontal=True)
 
-    if nav == "Ajouter":
+    if nav == "Ajouter un véhicule":
         st.subheader("Ajouter un véhicule")
         if st.session_state['success_add_vehicle']:
             st.success("✅ Véhicule ajouté avec succès !"); st.balloons()
             st.session_state['success_add_vehicle'] = False
 
         with st.form("a"):
-            n=st.text_input("Nom"); c1,c2=st.columns(2); ma=c1.text_input("Marque"); mo=c2.text_input("Modèle")
-            im=st.text_input("Immat"); km=st.number_input("KM",0); an=st.number_input("Année",2000)
+            n=st.text_input("Surnom du véhicule (ex: La Clio de Papa)"); 
+            c1,c2=st.columns(2); ma=c1.text_input("Marque"); mo=c2.text_input("Modèle")
+            im=st.text_input("Immatriculation"); km=st.number_input("KM Actuel",0); an=st.number_input("Année",2000)
+            
             if st.form_submit_button("Ajouter", type="primary"):
                 if dm.add_vehicle({"Nom":n,"Marque":ma,"Modele":mo,"Immatriculation":im,"Annee":an,"KM_Actuel":km}):
                     st.session_state['success_add_vehicle'] = True; st.rerun()
-                else: st.error("Erreur")
+                else: st.error("Erreur lors de l'ajout")
     else:
+        # Liste Véhicules
         vl = dm.get_vehicle_list()
-        if not vl: st.info("Vide.")
+        if not vl: st.info("Vous n'avez aucun véhicule. Ajoutez-en un !")
         else:
-            sel = st.selectbox("Choix", vl, format_func=lambda x: x[1])
+            sel = st.selectbox("Choisir un véhicule", vl, format_func=lambda x: x[1])
             vid = sel[0]
             inf = dm.get_vehicle_info(vid)
             if inf:
-                st.markdown(f"### {inf.get('marque')} {inf.get('modele')}")
-                t1,t2,t3 = st.tabs(["Diag IA", "Carnet", "Plan"])
+                st.markdown(f"### 🚘 {inf.get('marque')} {inf.get('modele')}")
+                t1,t2,t3 = st.tabs(["🤖 Diagnostic IA", "📒 Carnet & Notes", "📅 Plan Entretien"])
                 
                 with t1:
+                    st.info("Décrivez votre problème, l'IA analysera les pannes probables.")
+                    
                     if not ai: 
-                        if not ai_allowed: st.error("🔒 IA non autorisée.")
-                        else: st.warning("IA en maintenance.")
+                        if not ai_allowed: st.error("🔒 Votre abonnement ne permet pas l'accès à l'IA.")
+                        else: st.warning("🛠️ IA en maintenance temporaire.")
                     
                     with st.form("d"):
-                        c=st.text_input("Code"); s=st.text_area("Symp"); d=st.date_input("Date", date.today())
-                        if st.form_submit_button("Analys", disabled=(ai is None)):
-                            with st.spinner("..."):
+                        c=st.text_input("Code Défaut (Optionnel, ex: P0300)"); 
+                        s=st.text_area("Symptômes (Bruits, fumée, comportement...)", height=100)
+                        d=st.date_input("Date d'apparition", date.today())
+                        
+                        submit_diag = st.form_submit_button("Lancer l'Analyse 🧠", disabled=(ai is None), type="primary")
+                        
+                        if submit_diag:
+                            with st.spinner("L'IA analyse votre véhicule et l'historique..."):
                                 h = dm.get_full_history_text(vid)
                                 r = ai.analyze_obd(inf, h, f"{c} {s}", d)
                                 if "error" in r: st.error(r['error'])
                                 else:
+                                    st.success("Analyse terminée !")
                                     st.markdown(r['resume_court'])
+                                    with st.expander("Voir le rapport détaillé"):
+                                        st.write(r)
+                                    # Sauvegarde auto
                                     dm.save_diagnostic(vid, c, str(r), r.get('estimation_cout_pieces_mo'), r.get('sante_vehicule'), d, r.get('resume_court'))
+
+                    # Historique Diags
+                    st.caption("Historique des diagnostics IA :")
                     dh = dm.get_diagnostic_history(vid)
-                    if dh: st.dataframe(pd.DataFrame(dh)[['Date_Detection','Code_Defaut','Resume_IA']], hide_index=True)
+                    if dh: 
+                        # Correction WARNING Streamlit: width='stretch'
+                        st.dataframe(pd.DataFrame(dh)[['Date_Detection','Code_Defaut','Resume_IA']], hide_index=True, width='stretch')
 
                 with t2:
+                    st.write("Historique des interventions et notes personnelles.")
                     no = dm.get_notes_list(vid)
-                    if no: st.dataframe(pd.DataFrame(no)[['Date_Intervention','Type','Notes']], hide_index=True)
-                    with st.expander("Ajouter note"):
+                    if no: 
+                         # Correction WARNING Streamlit: width='stretch'
+                        st.dataframe(pd.DataFrame(no)[['Date_Intervention','Type','Notes']], hide_index=True, width='stretch')
+                    
+                    with st.expander("➕ Ajouter une note manuelle"):
                         with st.form("nt"):
-                            d=st.date_input("D"); t=st.selectbox("T",["Entretien","Autre"]); tx=st.text_area("Txt")
-                            if st.form_submit_button("Ok"): dm.add_note(vid,t,tx,d); st.rerun()
+                            d=st.date_input("Date"); t=st.selectbox("Type",["Entretien","Réparation","Autre"]); tx=st.text_area("Description")
+                            if st.form_submit_button("Enregistrer Note"): dm.add_note(vid,t,tx,d); st.rerun()
 
                 with t3:
-                    if st.button("Plan", disabled=(ai is None)):
-                        r = ai.check_maintenance_schedule(inf, dm.get_full_history_text(vid))
-                        if "error" not in r: st.markdown(r['response']); dm.save_echeance(vid, r['response'])
+                    st.write("Plan de maintenance prédictif généré par l'IA.")
+                    if st.button("Générer / Mettre à jour le plan", disabled=(ai is None)):
+                        with st.spinner("Calcul des échéances..."):
+                            r = ai.check_maintenance_schedule(inf, dm.get_full_history_text(vid))
+                            if "error" not in r: 
+                                st.markdown(r['response'])
+                                dm.save_echeance(vid, r['response'])
+                            else: st.error(r['error'])
