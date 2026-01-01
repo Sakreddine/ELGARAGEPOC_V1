@@ -3,10 +3,48 @@ from data_manager import DataManager
 from ai_engine import AIEngine
 from datetime import date
 import pandas as pd
+import requests
+import time
 
+# --- CONFIGURATION INITIALE ---
 st.set_page_config(page_title="ELGarage SaaS", layout="wide", initial_sidebar_state="collapsed")
 st.markdown("""<style>.stButton>button { height: 3em; width: 100%; border-radius: 10px; font-weight: bold; } .report-container { background-color: #f8f9fa; border: 2px solid #f25c05; border-radius: 10px; padding: 15px; margin-bottom: 20px; } #MainMenu {visibility: hidden;} footer {visibility: hidden;} .block-container { padding-top: 2rem; }</style>""", unsafe_allow_html=True)
 
+# --- MONITORING SERVEUR (NOUVEAU) ---
+API_URL = "https://elgarage-api.onrender.com"  # Votre URL Render
+
+def afficher_etat_serveur():
+    """Vérifie l'état de l'API et l'affiche dans la sidebar"""
+    st.sidebar.header("📡 État du Système")
+    status_box = st.sidebar.empty()
+    
+    if st.sidebar.button("🔄 Vérifier connexion"):
+        st.rerun()
+
+    try:
+        start_time = time.time()
+        # Ping sur la racine de l'API
+        response = requests.get(f"{API_URL}/", timeout=5) 
+        duration = round((time.time() - start_time) * 1000)
+
+        if response.status_code == 200:
+            status_box.success(f"🟢 **EN LIGNE** ({duration}ms)")
+        else:
+            status_box.warning(f"🟠 **Code {response.status_code}**")
+            
+    except requests.exceptions.ConnectionError:
+        status_box.error("🔴 **HORS LIGNE**")
+        st.sidebar.info("Le serveur est peut-être éteint.")
+    except requests.exceptions.Timeout:
+        status_box.warning("🟠 **LENT (Réveil...)**")
+        st.sidebar.caption("Le serveur sort de veille, réessayez dans 30s.")
+    except Exception as e:
+        status_box.error("Erreur inconnue")
+
+# Appel immédiat pour afficher dans la sidebar
+afficher_etat_serveur()
+
+# --- INITIALISATION DATA MANAGER ---
 if 'dm' not in st.session_state: st.session_state['dm'] = DataManager()
 dm = st.session_state['dm']
 
@@ -19,7 +57,7 @@ IS_MAINTENANCE = settings['maintenance_mode'] if settings else True
 ACTIVE_KEY = settings['groq_api_key'] if settings else None
 if 'success_add_vehicle' not in st.session_state: st.session_state['success_add_vehicle'] = False
 
-# LOGIN
+# --- LOGIN SYSTEM ---
 if 'user_logged_in' not in st.session_state: st.session_state['user_logged_in'] = False
 
 if not st.session_state['user_logged_in']:
@@ -45,7 +83,7 @@ if not st.session_state['user_logged_in']:
                     st.session_state['user_logged_in'] = True
                     user_can_ai = dm.current_user.get('ai_allowed', False)
                     if role == 'admin' and ACTIVE_KEY:
-                         st.session_state['ai'] = AIEngine(api_key=ACTIVE_KEY)
+                          st.session_state['ai'] = AIEngine(api_key=ACTIVE_KEY)
                     elif not IS_MAINTENANCE and ACTIVE_KEY and user_can_ai:
                         st.session_state['ai'] = AIEngine(api_key=ACTIVE_KEY)
                     st.rerun()
@@ -62,7 +100,7 @@ if not st.session_state['user_logged_in']:
             else: st.error("Erreur")
     st.stop()
 
-# APP
+# --- APP PRINCIPALE ---
 user = st.session_state['dm'].current_user
 role = user.get('role', 'user')
 ai_allowed = user.get('ai_allowed', False)
@@ -82,7 +120,7 @@ with c2:
         st.session_state['user_logged_in'] = False
         st.rerun()
 
-# ADMIN
+# --- INTERFACE ADMIN ---
 if role == 'admin':
     st.divider()
     t1, t2, t3, t4 = st.tabs(["⚙️ Config", "👥 Users", "🚗 Flotte Complète", "📊 Stats"])
@@ -169,7 +207,7 @@ if role == 'admin':
 
     with t4: st.json(dm.get_app_stats())
 
-# USER
+# --- INTERFACE USER ---
 else:
     nav = st.radio("Menu", ["Mes Véhicules", "Ajouter"], horizontal=True)
 
